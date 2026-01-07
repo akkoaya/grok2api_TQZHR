@@ -70,29 +70,63 @@ curl https://你的服务器地址/v1/chat/completions \
 
 ## 如何部署
 
-### docker-compose
+### 方式一：Docker Compose（推荐）
 
+由于本项目包含修改，建议直接构建运行：
+
+1. 克隆本仓库
+```bash
+git clone https://github.com/Tomiya233/grok2api.git
+cd grok2api
+```
+
+2. 启动服务
+```bash
+docker-compose up -d --build
+```
+
+**docker-compose.yml 参考：**
 ```yaml
 services:
   grok2api:
-    image: ghcr.io/chenyme/grok2api:latest
+    build: .
+    image: grok2api:latest
+    container_name: grok2api
+    restart: always
     ports:
       - "8000:8000"
     volumes:
       - grok_data:/app/data
       - ./logs:/app/logs
     environment:
-      # =====存储模式: file, mysql 或 redis=====
-      - STORAGE_MODE=file
-      # =====数据库连接 URL (仅在STORAGE_MODE=mysql或redis时需要)=====
-      # - DATABASE_URL=mysql://user:password@host:3306/grok2api
-
-      ## MySQL格式: mysql://user:password@host:port/database
-      ## Redis格式: redis://host:port/db 或 redis://user:password@host:port/db (SSL: rediss://)
+      - LOG_LEVEL=INFO
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   grok_data:
 ```
+
+### 方式二：Python 直接运行
+
+**前置要求**：Python 3.10+，建议使用 `uv` 包管理器
+
+1. 安装 uv
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. 运行服务
+```bash
+# 安装依赖并运行
+uv sync
+uv run python main.py
+```
+
+服务默认运行在 `http://127.0.0.1:8000`
 
 ### 环境变量说明
 
