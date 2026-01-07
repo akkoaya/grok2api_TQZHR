@@ -7,6 +7,7 @@
   <title>管理控制台 - Grok2API</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     @keyframes slide-up {
       from {
@@ -283,6 +284,8 @@
       <nav class="flex space-x-8">
         <button onclick="switchTab('tokens')" id="tabTokens"
           class="tab-btn border-b-2 border-primary text-sm font-medium py-3 px-1">Token 管理</button>
+        <button onclick="switchTab('statistics')" id="tabStatistics"
+          class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">请求统计</button>
         <button onclick="switchTab('settings')" id="tabSettings"
           class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">Setting 配置</button>
       </nav>
@@ -752,6 +755,46 @@
         </div>
       </div>
     </div>
+
+    <!-- 统计面板 -->
+    <div id="panelStatistics" class="hidden">
+      <!-- 概览卡片 -->
+      <div class="grid gap-4 grid-cols-2 md:grid-cols-4 mb-6">
+        <div class="rounded-lg border border-border bg-background p-4">
+          <p class="text-sm font-medium text-muted-foreground mb-2">总请求数</p>
+          <h3 class="text-xl font-bold" id="reqStatTotal">-</h3>
+        </div>
+        <div class="rounded-lg border border-border bg-background p-4">
+          <p class="text-sm font-medium text-muted-foreground mb-2">成功请求</p>
+          <h3 class="text-xl font-bold text-green-600" id="reqStatSuccess">-</h3>
+        </div>
+        <div class="rounded-lg border border-border bg-background p-4">
+          <p class="text-sm font-medium text-muted-foreground mb-2">失败请求</p>
+          <h3 class="text-xl font-bold text-destructive" id="reqStatFailed">-</h3>
+        </div>
+        <div class="rounded-lg border border-border bg-background p-4">
+          <p class="text-sm font-medium text-muted-foreground mb-2">成功率</p>
+          <h3 class="text-xl font-bold text-blue-600" id="reqStatRate">-</h3>
+        </div>
+      </div>
+
+      <!-- 图表容器 -->
+      <div class="grid gap-6 lg:grid-cols-2 mb-6">
+        <div class="rounded-lg border border-border bg-background p-6">
+          <h3 class="text-sm font-semibold mb-4">24小时请求趋势</h3>
+          <canvas id="hourlyChart" height="200"></canvas>
+        </div>
+        <div class="rounded-lg border border-border bg-background p-6">
+          <h3 class="text-sm font-semibold mb-4">7天请求统计</h3>
+          <canvas id="dailyChart" height="200"></canvas>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-border bg-background p-6">
+        <h3 class="text-sm font-semibold mb-4">模型调用分布</h3>
+        <canvas id="modelsChart" height="150"></canvas>
+      </div>
+    </div>
   </main>
 
   <!-- 编辑信息模态框 -->
@@ -931,9 +974,73 @@
     const exportSelected = () => { if (!selectedTokens.size) return showToast('请先选择要导出的 Token', 'error'); const sd = allTokens.filter(t => selectedTokens.has(t.token)), csv = [['Token', '类型', '状态', '普通调用剩余', '高级调用剩余', '创建时间'].join(','), ...sd.map(t => [`"${t.token}"`, t.token_type === 'sso' ? 'SSO' : 'SuperSSO', t.status, t.remaining_queries === -1 ? '未使用' : t.remaining_queries, t.heavy_remaining_queries === -1 ? '未使用' : t.heavy_remaining_queries, `"${t.created_time ? new Date(t.created_time).toLocaleString('zh-CN') : '-'}"`].join(','))].join('\n'), l = document.createElement('a'); l.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })); l.download = `grok_tokens_${new Date().toISOString().slice(0, 10)}.csv`; l.style.display = 'none'; document.body.appendChild(l); l.click(); document.body.removeChild(l); URL.revokeObjectURL(l.href); showToast(`已导出 ${selectedTokens.size} 个 Token`, 'success') }
     showToast = (m, t = 'info') => { const d = document.createElement('div'), bc = { success: 'bg-green-600', error: 'bg-destructive', info: 'bg-primary' }; d.className = `fixed bottom-4 right-4 ${bc[t] || bc.info} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium z-50 animate-slide-up`; d.textContent = m; document.body.appendChild(d); setTimeout(() => { d.style.opacity = '0'; d.style.transition = 'opacity .3s'; setTimeout(() => d.parentNode && document.body.removeChild(d), 300) }, 2000) }
     logout = async () => { if (!confirm('确定要退出登录吗?')) return; try { await apiRequest('/api/logout', { method: 'POST' }) } catch (e) { console.error('登出失败:', e) } finally { localStorage.removeItem('adminToken'); location.href = '/login' } },
-      switchTab = t => { const cap = n => n.charAt(0).toUpperCase() + n.slice(1);['tokens', 'settings'].forEach(n => { const active = n === t; $(`panel${cap(n)}`).classList.toggle('hidden', !active); $(`tab${cap(n)}`).classList.toggle('border-primary', active); $(`tab${cap(n)}`).classList.toggle('text-primary', active); $(`tab${cap(n)}`).classList.toggle('border-transparent', !active); $(`tab${cap(n)}`).classList.toggle('text-muted-foreground', !active) }); t === 'settings' && loadSettings() },
+      switchTab = t => { const cap = n => n.charAt(0).toUpperCase() + n.slice(1);['tokens', 'statistics', 'settings'].forEach(n => { const active = n === t; $(`panel${cap(n)}`).classList.toggle('hidden', !active); $(`tab${cap(n)}`).classList.toggle('border-primary', active); $(`tab${cap(n)}`).classList.toggle('text-primary', active); $(`tab${cap(n)}`).classList.toggle('border-transparent', !active); $(`tab${cap(n)}`).classList.toggle('text-muted-foreground', !active) }); if (t === 'settings') loadSettings(); if (t === 'statistics') loadRequestStats() },
       updateCacheProxyReadonly = () => { const proxyUrl = $('cfgProxyUrl').value.trim(), cacheProxyInput = $('cfgCacheProxyUrl'); if (proxyUrl) { cacheProxyInput.readOnly = false; cacheProxyInput.classList.remove('bg-muted'); cacheProxyInput.placeholder = 'socks5://username:password@127.0.0.1:7890' } else { cacheProxyInput.readOnly = true; cacheProxyInput.classList.add('bg-muted'); cacheProxyInput.value = ''; cacheProxyInput.placeholder = '设置服务代理后自动启用' } },
       updateStatsigIdState = () => { const dynamicToggle = $('cfgDynamicStatsig'), statsigInput = $('cfgStatsigId'); if (dynamicToggle.checked) { statsigInput.disabled = true; statsigInput.classList.add('bg-muted', 'text-muted-foreground'); statsigInput.placeholder = '已启用动态生成' } else { statsigInput.disabled = false; statsigInput.classList.remove('bg-muted', 'text-muted-foreground'); statsigInput.placeholder = '' } },
+      loadRequestStats = async () => {
+        try {
+          const r = await apiRequest('/api/request-stats');
+          if (!r) return;
+          const d = await r.json();
+          if (d.success) {
+            const { hourly, daily, models, summary } = d.data;
+
+            // 更新概览
+            $('reqStatTotal').textContent = summary.total;
+            $('reqStatSuccess').textContent = summary.success;
+            $('reqStatFailed').textContent = summary.failed;
+            $('reqStatRate').textContent = summary.success_rate + '%';
+
+            // 销毁旧图表
+            ['hourlyChart', 'dailyChart', 'modelsChart'].forEach(id => {
+              const canvas = document.getElementById(id);
+              if (canvas.chart) canvas.chart.destroy();
+            });
+
+            // 24小时趋势 (折线图)
+            const ctxHourly = document.getElementById('hourlyChart').getContext('2d');
+            document.getElementById('hourlyChart').chart = new Chart(ctxHourly, {
+              type: 'line',
+              data: {
+                labels: hourly.map(i => i.hour),
+                datasets: [
+                  { label: '成功', data: hourly.map(i => i.success), borderColor: '#16a34a', tension: 0.3 },
+                  { label: '失败', data: hourly.map(i => i.failed), borderColor: '#dc2626', tension: 0.3 }
+                ]
+              },
+              options: { responsive: true, interaction: { mode: 'index', intersect: false } }
+            });
+
+            // 7天统计 (柱状图)
+            const ctxDaily = document.getElementById('dailyChart').getContext('2d');
+            document.getElementById('dailyChart').chart = new Chart(ctxDaily, {
+              type: 'bar',
+              data: {
+                labels: daily.map(i => i.date),
+                datasets: [
+                  { label: '成功', data: daily.map(i => i.success), backgroundColor: '#16a34a' },
+                  { label: '失败', data: daily.map(i => i.failed), backgroundColor: '#dc2626' }
+                ]
+              },
+              options: { responsive: true, scales: { x: { stacked: true }, y: { stacked: true } } }
+            });
+
+            // 模型分布 (环形图)
+            const ctxModels = document.getElementById('modelsChart').getContext('2d');
+            document.getElementById('modelsChart').chart = new Chart(ctxModels, {
+              type: 'doughnut',
+              data: {
+                labels: models.map(i => i.model),
+                datasets: [{
+                  data: models.map(i => i.count),
+                  backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6']
+                }]
+              },
+              options: { responsive: true, plugins: { legend: { position: 'right' } } }
+            });
+          }
+        } catch (e) { console.error('加载统计失败:', e); showToast('加载统计失败', 'error') }
+      },
       loadSettings = async () => { try { const r = await apiRequest('/api/settings'); if (!r) return; const d = await r.json(); if (d.success) { const g = d.data.global, k = d.data.grok; const cfClearance = k.cf_clearance || ''; const cleanCfDisplay = cfClearance.startsWith('cf_clearance=') ? cfClearance.split('cf_clearance=')[1] : cfClearance; $('cfgAdminUser').value = g.admin_username || ''; $('cfgAdminPass').value = ''; $('cfgLogLevel').value = g.log_level || 'DEBUG'; $('cfgImageCacheMaxSize').value = g.image_cache_max_size_mb || 500; $('cfgVideoCacheMaxSize').value = g.video_cache_max_size_mb || 1000; $('cfgImageMode').value = g.image_mode || 'url'; $('cfgBaseUrl').value = g.base_url || ''; $('cfgApiKey').value = k.api_key || ''; $('cfgProxyUrl').value = k.proxy_url || ''; $('cfgProxyPoolUrl').value = k.proxy_pool_url || ''; $('cfgProxyPoolInterval').value = k.proxy_pool_interval || 300; $('cfgCacheProxyUrl').value = k.cache_proxy_url || ''; $('cfgCfClearance').value = cleanCfDisplay; $('cfgStatsigId').value = k.x_statsig_id || ''; $('cfgDynamicStatsig').checked = k.dynamic_statsig !== false; updateStatsigIdState(); $('cfgFilteredTags').value = k.filtered_tags || ''; $('cfgShowThinking').value = k.show_thinking !== false ? 'true' : 'false'; $('cfgTemporary').value = k.temporary !== false ? 'true' : 'false'; $('cfgStreamChunkTimeout').value = k.stream_chunk_timeout || 120; $('cfgStreamFirstResponseTimeout').value = k.stream_first_response_timeout || 30; $('cfgStreamTotalTimeout').value = k.stream_total_timeout || 600; $('cfgRetryStatusCodes').value = (k.retry_status_codes || [401, 429]).join(','); updateCacheProxyReadonly(); await loadCacheSize() } } catch (e) { console.error('加载配置失败:', e); showToast('加载配置失败', 'error') } },
       loadCacheSize = async () => { try { const r = await apiRequest('/api/cache/size'); if (!r) return; const d = await r.json(); if (d.success) { ['image', 'video', 'total'].forEach(t => $(`${t}CacheSize`).value = d.data[`${t}_size`] || '0 MB') } } catch (e) { console.error('加载缓存大小失败:', e);['image', 'video', 'total'].forEach(t => $(`${t}CacheSize`).value = '0 MB') } },
       clearCacheByType = async (type, url, msg) => { if (!confirm(msg)) return; try { const r = await apiRequest(url, { method: 'POST' }); if (!r) return; const d = await r.json(); d.success ? (showToast(`${type}缓存清理完成，已删除 ${d.data.deleted_count || 0} 个文件`, 'success'), await loadCacheSize()) : showToast('清理失败: ' + (d.error || '未知错误'), 'error') } catch (e) { showToast('清理失败: ' + e.message, 'error') } },

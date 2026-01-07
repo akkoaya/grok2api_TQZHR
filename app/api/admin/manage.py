@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from app.core.config import setting
 from app.core.logger import logger
 from app.services.grok.token import token_manager
+from app.services.request_stats import request_stats
 from app.models.grok_models import TokenType
 
 
@@ -661,3 +662,15 @@ async def get_refresh_progress(_: bool = Depends(verify_admin_session)) -> Dict[
     except Exception as e:
         logger.error(f"[Admin] 获取刷新进度异常: {e}")
         raise HTTPException(status_code=500, detail={"error": f"获取进度失败: {e}"})
+
+
+@router.get("/api/request-stats")
+async def get_request_stats(_: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """获取请求统计数据"""
+    try:
+        stats = request_stats.get_stats(hours=24, days=7)
+        return {"success": True, "data": stats}
+    except Exception as e:
+        logger.error(f"[Admin] 获取请求统计异常: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"获取统计失败: {e}"})
+

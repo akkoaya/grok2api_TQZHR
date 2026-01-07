@@ -9,6 +9,7 @@ from app.core.exception import GrokApiException
 from app.core.logger import logger
 from app.services.grok.client import GrokClient
 from app.models.openai_schema import OpenAIChatRequest
+from app.services.request_stats import request_stats
 
 
 router = APIRouter(prefix="/chat", tags=["聊天"])
@@ -17,11 +18,15 @@ router = APIRouter(prefix="/chat", tags=["聊天"])
 @router.post("/completions", response_model=None)
 async def chat_completions(request: OpenAIChatRequest, _: Optional[str] = Depends(auth_manager.verify)):
     """创建聊天补全（支持流式和非流式）"""
+    model = request.model
     try:
         logger.info("[Chat] 收到聊天请求")
 
         # 调用Grok客户端
         result = await GrokClient.openai_to_grok(request.model_dump())
+        
+        # 记录成功
+        request_stats.record_request(model, success=True)
         
         # 流式响应
         if request.stream:
@@ -39,6 +44,8 @@ async def chat_completions(request: OpenAIChatRequest, _: Optional[str] = Depend
         return result
         
     except GrokApiException as e:
+        # 记录失败
+        request_stats.record_request(model, success=False)
         logger.error(f"[Chat] Grok API错误: {e} - 详情: {e.details}")
         raise HTTPException(
             status_code=500,
@@ -51,6 +58,8 @@ async def chat_completions(request: OpenAIChatRequest, _: Optional[str] = Depend
             }
         )
     except Exception as e:
+        # 记录失败
+        request_stats.record_request(model, success=False)
         logger.error(f"[Chat] 处理失败: {e}")
         raise HTTPException(
             status_code=500,
