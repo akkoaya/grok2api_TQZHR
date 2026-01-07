@@ -2,7 +2,16 @@
 
 基于 **FastAPI** 重构的 Grok2API，全面适配最新 Web 调用格式，支持流式对话、图像生成、图像编辑、联网搜索、深度思考，号池并发与自动负载均衡一体化。
 
+## 🆕 Fork 增强功能
 
+本 Fork 在原版基础上新增以下功能：
+
+- **Token 智能冷却**：请求失败后自动冷却，避免连续使用故障 Token
+  - 普通错误：冷却 5 次请求
+  - 429 限流 + 有额度：冷却 1 小时
+  - 429 限流 + 无额度：冷却 10 小时
+- **一键刷新所有 Token**：后台按钮批量刷新剩余次数，带实时进度显示
+- **并发保护**：刷新任务进行中自动拒绝重复请求
 <br>
 
 ## 使用说明
@@ -134,6 +143,8 @@ volumes:
 | POST  | /api/tokens/test        | 测试 Token 可用性   | ✅   |
 | GET   | /api/tokens/tags/all    | 获取所有标签列表    | ✅   |
 | GET   | /api/storage/mode       | 获取存储模式信息    | ✅   |
+| POST  | /api/tokens/refresh-all | 一键刷新所有Token   | ✅   |
+| GET   | /api/tokens/refresh-progress | 获取刷新进度   | ✅   |
 
 </details>
 
