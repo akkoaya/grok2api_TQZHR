@@ -6,6 +6,9 @@
 
 本 Fork 在原版基础上新增以下功能：
 
+- **多 Key 管理系统**：支持管理员创建多个 API Key，可自定义备注，支持一键切换启用/禁用状态，方便分发给不同用户使用。
+- **日志审计功能**：实时记录每个 Key 的请求细节（时间、模型、IP、耗时、状态），支持日志清空。
+- **日志分页支持**：为了解决大数据量导致的浏览器卡顿，实现了 1000 条日志的前端分页展示（每页 20 条），响应极其流畅。
 - **Token 智能冷却**：请求失败后自动冷却，避免连续使用故障 Token
   - 普通错误：冷却 5 次请求
   - 429 限流 + 有额度：冷却 1 小时
@@ -179,7 +182,14 @@ uv run python main.py
 | GET   | /api/tokens/tags/all    | 获取所有标签列表    | ✅   |
 | GET   | /api/storage/mode       | 获取存储模式信息    | ✅   |
 | POST  | /api/tokens/refresh-all | 一键刷新所有Token   | ✅   |
-| GET   | /api/tokens/refresh-progress | 获取刷新进度   | ✅   |
+| GET   | /api/tokens/refresh-progress | 获取刷新进度       | ✅   |
+| GET   | /api/keys               | 获取 API Key 列表  | ✅   |
+| POST  | /api/keys/add           | 创建新 API Key     | ✅   |
+| POST  | /api/keys/delete        | 删除 API Key       | ✅   |
+| POST  | /api/keys/status        | 切换 Key 启用状态  | ✅   |
+| POST  | /api/keys/name          | 修改 Key 备注名称  | ✅   |
+| GET   | /api/logs               | 获取请求日志(1000条)| ✅   |
+| POST  | /api/logs/clear         | 清空所有审计日志   | ✅   |
 
 </details>
 
