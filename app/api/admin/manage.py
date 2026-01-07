@@ -674,3 +674,130 @@ async def get_request_stats(_: bool = Depends(verify_admin_session)) -> Dict[str
         logger.error(f"[Admin] 获取请求统计异常: {e}")
         raise HTTPException(status_code=500, detail={"error": f"获取统计失败: {e}"})
 
+
+# === API Key 管理 ===
+
+class AddKeyRequest(BaseModel):
+    name: str
+
+
+class UpdateKeyNameRequest(BaseModel):
+    key: str
+    name: str
+
+
+class UpdateKeyStatusRequest(BaseModel):
+    key: str
+    is_active: bool
+
+
+@router.get("/api/keys")
+async def list_keys(_: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """获取 Key 列表"""
+    try:
+        from app.services.api_keys import api_key_manager
+        if not hasattr(api_key_manager, '_keys'):
+             await api_key_manager.init()
+             
+        keys = api_key_manager.get_all_keys()
+        
+        # 添加默认 Key (可选)
+        global_key = setting.grok_config.get("api_key")
+        result_keys = []
+        
+        # 转换并脱敏
+        for k in keys:
+            result_keys.append({
+                **k,
+                "display_key": f"{k['key'][:6]}...{k['key'][-4:]}"
+            })
+            
+        return {
+            "success": True, 
+            "data": result_keys, 
+            "global_key_set": bool(global_key)
+        }
+    except Exception as e:
+        logger.error(f"[Admin] 获取Key列表失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"获取失败: {e}"})
+
+
+@router.post("/api/keys/add")
+async def add_key(request: AddKeyRequest, _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """添加 Key"""
+    try:
+        from app.services.api_keys import api_key_manager
+        new_key = await api_key_manager.add_key(request.name)
+        return {"success": True, "data": new_key, "message": "Key创建成功"}
+    except Exception as e:
+        logger.error(f"[Admin] 添加Key失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"添加失败: {e}"})
+
+
+@router.post("/api/keys/delete")
+async def delete_key(request: Dict[str, str], _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """删除 Key"""
+    try:
+        from app.services.api_keys import api_key_manager
+        key = request.get("key")
+        if not key:
+             raise ValueError("Key cannot be empty")
+             
+        if await api_key_manager.delete_key(key):
+            return {"success": True, "message": "Key删除成功"}
+        return {"success": False, "message": "Key不存在"}
+    except Exception as e:
+        logger.error(f"[Admin] 删除Key失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"删除失败: {e}"})
+
+
+@router.post("/api/keys/status")
+async def update_key_status(request: UpdateKeyStatusRequest, _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """更新 Key 状态"""
+    try:
+        from app.services.api_keys import api_key_manager
+        if await api_key_manager.update_key_status(request.key, request.is_active):
+            return {"success": True, "message": "状态更新成功"}
+        return {"success": False, "message": "Key不存在"}
+    except Exception as e:
+        logger.error(f"[Admin] 更新Key状态失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"更新失败: {e}"})
+        
+
+@router.post("/api/keys/name")
+async def update_key_name(request: UpdateKeyNameRequest, _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """更新 Key 备注"""
+    try:
+        from app.services.api_keys import api_key_manager
+        if await api_key_manager.update_key_name(request.key, request.name):
+            return {"success": True, "message": "备注更新成功"}
+        return {"success": False, "message": "Key不存在"}
+    except Exception as e:
+        logger.error(f"[Admin] 更新Key备注失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"更新失败: {e}"})
+
+
+# === 日志审计 ===
+
+@router.get("/api/logs")
+async def get_logs(limit: int = 1000, _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """获取请求日志"""
+    try:
+        from app.services.request_logger import request_logger
+        logs = await request_logger.get_logs(limit)
+        return {"success": True, "data": logs}
+    except Exception as e:
+        logger.error(f"[Admin] 获取日志失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"获取失败: {e}"})
+
+@router.post("/api/logs/clear")
+async def clear_logs(_: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """清空日志"""
+    try:
+        from app.services.request_logger import request_logger
+        await request_logger.clear_logs()
+        return {"success": True, "message": "日志已清空"}
+    except Exception as e:
+        logger.error(f"[Admin] 清空日志失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"清空失败: {e}"})
+
