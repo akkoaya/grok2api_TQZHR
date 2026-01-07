@@ -691,12 +691,26 @@ class UpdateKeyStatusRequest(BaseModel):
     is_active: bool
 
 
+class BatchAddKeyRequest(BaseModel):
+    name_prefix: str
+    count: int
+
+
+class BatchDeleteKeyRequest(BaseModel):
+    keys: List[str]
+
+
+class BatchUpdateKeyStatusRequest(BaseModel):
+    keys: List[str]
+    is_active: bool
+
+
 @router.get("/api/keys")
 async def list_keys(_: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
     """获取 Key 列表"""
     try:
         from app.services.api_keys import api_key_manager
-        if not hasattr(api_key_manager, '_keys'):
+        if not api_key_manager._loaded:
              await api_key_manager.init()
              
         keys = api_key_manager.get_all_keys()
@@ -775,6 +789,42 @@ async def update_key_name(request: UpdateKeyNameRequest, _: bool = Depends(verif
     except Exception as e:
         logger.error(f"[Admin] 更新Key备注失败: {e}")
         raise HTTPException(status_code=500, detail={"error": f"更新失败: {e}"})
+
+
+@router.post("/api/keys/batch-add")
+async def batch_add_keys(request: BatchAddKeyRequest, _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """批量添加 Key"""
+    try:
+        from app.services.api_keys import api_key_manager
+        new_keys = await api_key_manager.batch_add_keys(request.name_prefix, request.count)
+        return {"success": True, "data": new_keys, "message": f"成功创建 {len(new_keys)} 个 Key"}
+    except Exception as e:
+        logger.error(f"[Admin] 批量添加Key失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"批量添加失败: {e}"})
+
+
+@router.post("/api/keys/batch-delete")
+async def batch_delete_keys(request: BatchDeleteKeyRequest, _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """批量删除 Key"""
+    try:
+        from app.services.api_keys import api_key_manager
+        deleted_count = await api_key_manager.batch_delete_keys(request.keys)
+        return {"success": True, "message": f"成功删除 {deleted_count} 个 Key"}
+    except Exception as e:
+        logger.error(f"[Admin] 批量删除Key失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"批量删除失败: {e}"})
+
+
+@router.post("/api/keys/batch-status")
+async def batch_update_key_status(request: BatchUpdateKeyStatusRequest, _: bool = Depends(verify_admin_session)) -> Dict[str, Any]:
+    """批量更新 Key 状态"""
+    try:
+        from app.services.api_keys import api_key_manager
+        updated_count = await api_key_manager.batch_update_keys_status(request.keys, request.is_active)
+        return {"success": True, "message": f"成功更新 {updated_count} 个 Key 状态"}
+    except Exception as e:
+        logger.error(f"[Admin] 批量更新Key状态失败: {e}")
+        raise HTTPException(status_code=500, detail={"error": f"批量更新失败: {e}"})
 
 
 # === 日志审计 ===

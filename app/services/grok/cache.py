@@ -115,8 +115,7 @@ class CacheService:
                                 return None
                         
                         response.raise_for_status()
-                        
-                        cache_path.write_bytes(response.content)
+                        await asyncio.to_thread(cache_path.write_bytes, response.content)
                         
                         if outer_retry > 0 or retry_403_count > 0:
                             self._log("info", f"重试成功！")
@@ -174,7 +173,7 @@ class CacheService:
                 for path, size, _ in sorted(files, key=lambda x: x[2]):
                     if total <= max_bytes:
                         break
-                    path.unlink()
+                    await asyncio.to_thread(path.unlink)
                     total -= size
                 
                 self._log("info", f"清理完成: {total/1024/1024:.1f}MB")

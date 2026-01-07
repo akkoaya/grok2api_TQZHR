@@ -453,7 +453,7 @@
     <div id="panelKeys" class="hidden">
       <!-- 工具栏 -->
       <div class="flex items-center justify-between gap-4 mb-6">
-        <h2 class="text-xl font-bold">Key 管理</h2>
+        <h2 class="text-xl font-bold">Key Management</h2>
         <div class="flex items-center gap-2">
           <button onclick="loadKeys()" class="btn-icon" title="刷新列表">
             <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
@@ -463,6 +463,16 @@
               <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
               <path d="M16 21h5v-5" />
             </svg>
+          </button>
+          <button onclick="openBatchAddModal()"
+            class="inline-flex items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3">
+            <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="12" y1="8" x2="12" y2="16" />
+              <line x1="8" y1="12" x2="16" y2="12" />
+            </svg>
+            <span class="text-sm font-medium">批量创建</span>
           </button>
           <button onclick="openAddKeyModal()"
             class="inline-flex items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3">
@@ -476,12 +486,32 @@
         </div>
       </div>
 
+      <!-- 批量操作栏 -->
+      <div id="batchActionBar"
+        class="hidden mb-4 p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-medium text-primary"><span id="selectedCount">0</span> 个项目被选中</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="batchUpdateStatus(true)"
+            class="text-xs px-2 py-1 rounded bg-background border border-border hover:bg-accent transition-colors">批量启用</button>
+          <button onclick="batchUpdateStatus(false)"
+            class="text-xs px-2 py-1 rounded bg-background border border-border hover:bg-accent transition-colors">批量禁用</button>
+          <button onclick="batchDeleteKeys()"
+            class="text-xs px-2 py-1 rounded bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors">批量删除</button>
+        </div>
+      </div>
+
       <!-- Key 表格 -->
       <div class="rounded-lg border border-border bg-background">
         <div class="relative w-full overflow-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b border-border">
+                <th class="h-10 px-4 text-left align-middle font-medium w-12">
+                  <input type="checkbox" id="selectAllKeys" onchange="toggleSelectAllKeys(this)"
+                    class="rounded border-border text-primary focus:ring-primary h-4 w-4">
+                </th>
                 <th class="h-10 px-4 text-left align-middle font-medium w-48">备注</th>
                 <th class="h-10 px-4 text-left align-middle font-medium w-64">Key</th>
                 <th class="h-10 px-4 text-left align-middle font-medium w-32">创建时间</th>
@@ -1018,9 +1048,93 @@
     </div>
   </div>
 
+  <!-- 新增 Key 模态框 -->
+  <div id="modalAddKey" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div class="bg-background rounded-lg border border-border w-full max-w-md shadow-xl">
+      <div class="flex items-center justify-between p-5 border-b border-border">
+        <h3 class="text-lg font-semibold">新增 API Key</h3>
+        <button onclick="closeAddKeyModal()" class="text-muted-foreground hover:text-foreground transition-colors">
+          <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-muted-foreground">备注名称</label>
+          <input type="text" id="newKeyName" placeholder="例如: 某某应用使用"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-3 p-5 border-t border-border bg-muted/30">
+        <button onclick="closeAddKeyModal()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent h-9 px-5">取消</button>
+        <button onclick="doAddKey()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-5">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批量创建 Key 模态框 -->
+  <div id="modalBatchAddKey" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div class="bg-background rounded-lg border border-border w-full max-w-md shadow-xl">
+      <div class="flex items-center justify-between p-5 border-b border-border">
+        <h3 class="text-lg font-semibold">批量创建 API Key</h3>
+        <button onclick="closeBatchAddModal()" class="text-muted-foreground hover:text-foreground transition-colors">
+          <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-muted-foreground">名称前缀</label>
+          <input type="text" id="batchKeyPrefix" placeholder="例如: 测试用户"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+        </div>
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-muted-foreground">创建数量 (1-50)</label>
+          <input type="number" id="batchKeyCount" value="10" min="1" max="50"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-3 p-5 border-t border-border bg-muted/30">
+        <button onclick="closeBatchAddModal()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors border border-input bg-background hover:bg-accent h-9 px-5">取消</button>
+        <button onclick="doBatchAddKeys()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-5">确认创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批量创建结果模态框 -->
+  <div id="modalBatchResult" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div class="bg-background rounded-lg border border-border w-full max-w-2xl shadow-xl">
+      <div class="flex items-center justify-between p-5 border-b border-border">
+        <h3 class="text-lg font-semibold">创建成功</h3>
+        <button onclick="copyBatchResults()" class="text-sm text-primary hover:underline font-medium">点击复制全部</button>
+      </div>
+      <div class="p-5">
+        <div class="bg-muted p-4 rounded-md border border-border">
+          <textarea id="batchResultContent" readonly
+            class="w-full h-80 bg-transparent border-none focus:ring-0 text-xs font-mono resize-none"></textarea>
+        </div>
+      </div>
+      <div class="flex items-center justify-end p-5 border-t border-border bg-muted/30">
+        <button onclick="closeBatchResultModal()"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-5">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let allTokens = [], filteredTokens = [], selectedTokens = new Set(), allTagsList = [];
     let allLogsData = [], currentLogPage = 1, logsPerPage = 20;
+    const selectedKeys = new Set();
     const $ = (id) => document.getElementById(id);
 
     const apiRequest = async (u, o = {}) => {
@@ -1080,14 +1194,18 @@
           const tbody = $('keyTableBody');
           tbody.innerHTML = '';
 
-          // 全局Key提示
-          $('globalKeyAlert').classList.toggle('hidden', !d.global_key_set);
-          $('keyEmptyState').classList.toggle('hidden', d.data.length > 0);
+          // 重置选择
+          selectedKeys.clear();
+          $('selectAllKeys').checked = false;
+          updateBatchActionBar();
 
           d.data.forEach(k => {
             const tr = document.createElement('tr');
             tr.className = 'border-b border-border hover:bg-muted/50 transition-colors';
             tr.innerHTML = `
+                        <td class="p-4 align-middle">
+                            <input type="checkbox" data-key="${k.key}" onchange="toggleKeySelection(this)" class="key-checkbox rounded border-border text-primary focus:ring-primary h-4 w-4">
+                        </td>
                         <td class="p-4 align-middle">
                             <span class="font-medium">${k.name || '-'}</span>
                             <button onclick="editKeyName('${k.key}', '${k.name}')" class="ml-2 text-xs text-muted-foreground hover:text-primary">
@@ -1101,7 +1219,7 @@
                                 ${k.is_active ? '启用' : '禁用'}
                             </span>
                         </td>
-                        <td class="p-4 align-middle text-right">
+                        <td class="p-4 align-middle text-right text-xs">
                              <button onclick="copyToClipboard('${k.key}')" class="btn-icon text-muted-foreground hover:text-primary mr-2" title="复制完整Key">
                                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                             </button>
@@ -1119,21 +1237,97 @@
       } catch (e) { console.error(e); showToast('加载Keys失败', 'error') }
     };
 
-    const openAddKeyModal = () => {
-      const name = prompt("请输入 Key 的备注名称:");
-      if (name) addKey(name);
-    };
+    const openAddKeyModal = () => $('modalAddKey').classList.remove('hidden');
+    const closeAddKeyModal = () => { $('modalAddKey').classList.add('hidden'); $('newKeyName').value = '' };
 
-    const addKey = async (name) => {
+    const doAddKey = async () => {
+      const name = $('newKeyName').value.trim();
+      if (!name) return showToast('请输入备注名称', 'error');
       try {
         const r = await apiRequest('/api/keys/add', { method: 'POST', body: JSON.stringify({ name }) });
         const d = await r.json();
         if (d.success) {
+          closeAddKeyModal();
           showToast('Key创建成功');
-          prompt("请复制您的新 Key (仅显示一次):", d.data.key);
           loadKeys();
+          // 单个创建也弹窗显示一下方便复制
+          $('batchResultContent').value = d.data.key;
+          $('modalBatchResult').classList.remove('hidden');
         } else throw new Error(d.error);
       } catch (e) { showToast('创建失败: ' + e.message, 'error') }
+    };
+
+    const openBatchAddModal = () => $('modalBatchAddKey').classList.remove('hidden');
+    const closeBatchAddModal = () => { $('modalBatchAddKey').classList.add('hidden'); $('batchKeyPrefix').value = ''; $('batchKeyCount').value = 10 };
+
+    const doBatchAddKeys = async () => {
+      const prefix = $('batchKeyPrefix').value.trim();
+      const count = parseInt($('batchKeyCount').value);
+      if (!prefix) return showToast('请输入名称前缀', 'error');
+      if (isNaN(count) || count < 1 || count > 50) return showToast('创建数量需在 1-50 之间', 'error');
+
+      try {
+        const r = await apiRequest('/api/keys/batch-add', { method: 'POST', body: JSON.stringify({ name_prefix: prefix, count }) });
+        const d = await r.json();
+        if (d.success) {
+          closeBatchAddModal();
+          showToast(`成功创建 ${d.data.length} 个 Key`);
+          loadKeys();
+          // 显示结果
+          $('batchResultContent').value = d.data.map(k => k.key).join('\n');
+          $('modalBatchResult').classList.remove('hidden');
+        } else throw new Error(d.error);
+      } catch (e) { showToast('批量创建失败: ' + e.message, 'error') }
+    };
+
+    const closeBatchResultModal = () => $('modalBatchResult').classList.add('hidden');
+    const copyBatchResults = () => {
+      const content = $('batchResultContent');
+      content.select();
+      document.execCommand('copy');
+      showToast('已复制全部 Key 到剪贴板', 'success');
+    };
+
+    const toggleSelectAllKeys = (el) => {
+      const boxes = document.querySelectorAll('.key-checkbox');
+      boxes.forEach(cb => {
+        cb.checked = el.checked;
+        if (el.checked) selectedKeys.add(cb.dataset.key);
+        else selectedKeys.delete(cb.dataset.key);
+      });
+      updateBatchActionBar();
+    };
+
+    const toggleKeySelection = (el) => {
+      if (el.checked) selectedKeys.add(el.dataset.key);
+      else selectedKeys.delete(el.dataset.key);
+      $('selectAllKeys').checked = selectedKeys.size === document.querySelectorAll('.key-checkbox').length;
+      updateBatchActionBar();
+    };
+
+    const updateBatchActionBar = () => {
+      const bar = $('batchActionBar');
+      const count = $('selectedCount');
+      if (count) count.textContent = selectedKeys.size;
+      if (bar) bar.classList.toggle('hidden', selectedKeys.size === 0);
+    };
+
+    const batchDeleteKeys = async () => {
+      if (!selectedKeys.size || !confirm(`确定要删除选中的 ${selectedKeys.size} 个 Key 吗？此操作无法撤销！`)) return;
+      try {
+        const r = await apiRequest('/api/keys/batch-delete', { method: 'POST', body: JSON.stringify({ keys: Array.from(selectedKeys) }) });
+        const d = await r.json();
+        if (d.success) { showToast(d.message); loadKeys() }
+      } catch (e) { showToast('批量删除失败', 'error') }
+    };
+
+    const batchUpdateStatus = async (isActive) => {
+      if (!selectedKeys.size) return;
+      try {
+        const r = await apiRequest('/api/keys/batch-status', { method: 'POST', body: JSON.stringify({ keys: Array.from(selectedKeys), is_active: isActive }) });
+        const d = await r.json();
+        if (d.success) { showToast(d.message); loadKeys() }
+      } catch (e) { showToast('批量更新失败', 'error') }
     };
 
     const deleteKey = async (key) => {

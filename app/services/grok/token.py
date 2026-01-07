@@ -75,17 +75,19 @@ class GrokTokenManager:
         """异步加载Token数据（支持多进程）"""
         default = {TokenType.NORMAL.value: {}, TokenType.SUPER.value: {}}
         
+        def load_sync():
+            with open(self.token_file, "r", encoding="utf-8") as f:
+                portalocker.lock(f, portalocker.LOCK_SH)
+                try:
+                    return orjson.loads(f.read())
+                finally:
+                    portalocker.unlock(f)
+
         try:
             if self.token_file.exists():
                 # 使用进程锁读取文件
                 async with self._file_lock:
-                    with open(self.token_file, "r", encoding="utf-8") as f:
-                        portalocker.lock(f, portalocker.LOCK_SH)  # 共享锁（读）
-                        try:
-                            content = f.read()
-                            self.token_data = orjson.loads(content)
-                        finally:
-                            portalocker.unlock(f)
+                    self.token_data = await asyncio.to_thread(load_sync)
             else:
                 self.token_data = default
                 logger.debug("[Token] 创建新数据文件")
@@ -95,23 +97,25 @@ class GrokTokenManager:
 
     async def _save_data(self) -> None:
         """保存Token数据（支持多进程）"""
+        def save_sync(data):
+            with open(self.token_file, "w", encoding="utf-8") as f:
+                portalocker.lock(f, portalocker.LOCK_EX)
+                try:
+                    content = orjson.dumps(data, option=orjson.OPT_INDENT_2).decode()
+                    f.write(content)
+                    f.flush()
+                finally:
+                    portalocker.unlock(f)
+
         try:
             if not self._storage:
                 async with self._file_lock:
-                    # 使用进程锁写入文件
-                    with open(self.token_file, "w", encoding="utf-8") as f:
-                        portalocker.lock(f, portalocker.LOCK_EX)  # 独占锁（写）
-                        try:
-                            content = orjson.dumps(self.token_data, option=orjson.OPT_INDENT_2).decode()
-                            f.write(content)
-                            f.flush()  # 确保写入磁盘
-                        finally:
-                            portalocker.unlock(f)
+                    await asyncio.to_thread(save_sync, self.token_data)
             else:
                 await self._storage.save_tokens(self.token_data)
-        except IOError as e:
+        except Exception as e:
             logger.error(f"[Token] 保存失败: {e}")
-            raise GrokApiException(f"保存失败: {e}", "TOKEN_SAVE_ERROR", {"file": str(self.token_file)})
+            raise GrokApiException(f"保存失败: {e}", "TOKEN_SAVE_ERROR")
 
     def _mark_dirty(self) -> None:
         """标记有待保存的数据"""
@@ -235,33 +239,35 @@ class GrokTokenManager:
         """获取所有Token"""
         return self.token_data.copy()
 
-    def _reload_if_needed(self) -> None:
-        """在多进程模式下重新加载数据（同步版本，用于select_token）"""
+    async def _reload_if_needed(self) -> None:
+        """在多进程模式下重新加载数据"""
         # 只在文件模式且多进程环境下才重新加载
         if self._storage:
-            return  # 数据库模式不需要
+            return
         
+        def reload_sync():
+            with open(self.token_file, "r", encoding="utf-8") as f:
+                portalocker.lock(f, portalocker.LOCK_SH)
+                try:
+                    return orjson.loads(f.read())
+                finally:
+                    portalocker.unlock(f)
+
         try:
             if self.token_file.exists():
-                with open(self.token_file, "r", encoding="utf-8") as f:
-                    portalocker.lock(f, portalocker.LOCK_SH)
-                    try:
-                        content = f.read()
-                        self.token_data = orjson.loads(content)
-                    finally:
-                        portalocker.unlock(f)
+                self.token_data = await asyncio.to_thread(reload_sync)
         except Exception as e:
             logger.warning(f"[Token] 重新加载失败: {e}")
 
-    def get_token(self, model: str) -> str:
+    async def get_token(self, model: str) -> str:
         """获取Token"""
-        jwt = self.select_token(model)
+        jwt = await self.select_token(model)
         return f"sso-rw={jwt};sso={jwt}"
     
-    def select_token(self, model: str) -> str:
+    async def select_token(self, model: str) -> str:
         """选择最优Token（多进程安全，支持冷却）"""
         # 重新加载最新数据（多进程模式）
-        self._reload_if_needed()
+        await self._reload_if_needed()
         
         # 递减所有次数冷却计数
         self._request_counter += 1

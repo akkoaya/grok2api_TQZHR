@@ -39,7 +39,7 @@ async def chat_completions(
         result = await GrokClient.openai_to_grok(body.model_dump())
         
         # 记录成功统计
-        request_stats.record_request(model, success=True)
+        await request_stats.record_request(model, success=True)
         
         # 流式响应
         if body.stream:
@@ -70,7 +70,7 @@ async def chat_completions(
     except GrokApiException as e:
         status_code = e.status_code or 500
         error_msg = str(e)
-        request_stats.record_request(model, success=False)
+        await request_stats.record_request(model, success=False)
         logger.error(f"[Chat] Grok API错误: {e} - 详情: {e.details}")
         
         duration = time.time() - start_time
@@ -89,7 +89,7 @@ async def chat_completions(
     except Exception as e:
         status_code = 500
         error_msg = str(e)
-        request_stats.record_request(model, success=False)
+        await request_stats.record_request(model, success=False)
         logger.error(f"[Chat] 处理失败: {e}")
         
         duration = time.time() - start_time

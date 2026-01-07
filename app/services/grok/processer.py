@@ -4,7 +4,7 @@ import orjson
 import uuid
 import time
 import asyncio
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, Tuple, Any
 
 from app.core.config import setting
 from app.core.exception import GrokApiException
@@ -64,7 +64,7 @@ class GrokResponseProcessor:
         """处理非流式响应"""
         response_closed = False
         try:
-            for chunk in response.iter_lines():
+            async for chunk in response.aiter_lines():
                 if not chunk:
                     continue
 
@@ -126,7 +126,7 @@ class GrokResponseProcessor:
                     logger.warning(f"[Processor] 关闭响应失败: {e}")
 
     @staticmethod
-    async def process_stream(response, auth_token: str) -> AsyncGenerator[str, None]:
+    async def process_stream(response, auth_token: str, session: Any = None) -> AsyncGenerator[str, None]:
         """处理流式响应"""
         # 状态变量
         is_image = False
@@ -164,7 +164,7 @@ class GrokResponseProcessor:
             return f"data: {chunk_data.model_dump_json()}\n\n"
 
         try:
-            for chunk in response.iter_lines():
+            async for chunk in response.aiter_lines():
                 # 超时检查
                 is_timeout, timeout_msg = timeout_mgr.check_timeout()
                 if is_timeout:
@@ -356,6 +356,13 @@ class GrokResponseProcessor:
                     logger.debug("[Processor] 响应已关闭")
                 except Exception as e:
                     logger.warning(f"[Processor] 关闭失败: {e}")
+            
+            if session:
+                try:
+                    await session.close()
+                    logger.debug("[Processor] 会话已关闭")
+                except Exception as e:
+                    logger.warning(f"[Processor] 关闭会话失败: {e}")
 
     @staticmethod
     async def _build_video_content(video_url: str, auth_token: str) -> str:

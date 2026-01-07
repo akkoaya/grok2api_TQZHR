@@ -1,9 +1,14 @@
 """请求统计模块 - 按小时/天统计请求数据"""
 
 import time
+import asyncio
+import orjson
 from datetime import datetime
 from typing import Dict, Any
+from pathlib import Path
 from collections import defaultdict
+
+from app.core.logger import logger
 
 
 class RequestStats:
@@ -20,6 +25,8 @@ class RequestStats:
         if hasattr(self, '_initialized'):
             return
         
+        self.file_path = Path(__file__).parents[2] / "data" / "stats.json"
+        
         # 统计数据
         self._hourly: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "success": 0, "failed": 0})
         self._daily: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "success": 0, "failed": 0})
@@ -29,10 +36,71 @@ class RequestStats:
         self._hourly_keep = 48  # 保留48小时
         self._daily_keep = 30   # 保留30天
         
+        self._lock = asyncio.Lock()
+        self._loaded = False
         self._initialized = True
+
+    async def init(self):
+        """初始化加载数据"""
+        if not self._loaded:
+            await self._load_data()
+
+    async def _load_data(self):
+        """从磁盘加载统计数据"""
+        if self._loaded:
+            return
+
+        if not self.file_path.exists():
+            self._loaded = True
+            return
+
+        try:
+            async with self._lock:
+                content = await asyncio.to_thread(self.file_path.read_bytes)
+                if content:
+                    data = orjson.loads(content)
+                    
+                    # 恢复 defaultdict 结构
+                    self._hourly = defaultdict(lambda: {"total": 0, "success": 0, "failed": 0})
+                    self._hourly.update(data.get("hourly", {}))
+                    
+                    self._daily = defaultdict(lambda: {"total": 0, "success": 0, "failed": 0})
+                    self._daily.update(data.get("daily", {}))
+                    
+                    self._models = defaultdict(int)
+                    self._models.update(data.get("models", {}))
+                    
+                    self._loaded = True
+                    logger.debug(f"[Stats] 加载统计数据成功")
+        except Exception as e:
+            logger.error(f"[Stats] 加载数据失败: {e}")
+            self._loaded = True # 防止覆盖
+
+    async def _save_data(self):
+        """保存统计数据到磁盘"""
+        if not self._loaded:
+            return
+
+        try:
+            # 确保目录存在
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            async with self._lock:
+                data = {
+                    "hourly": dict(self._hourly),
+                    "daily": dict(self._daily),
+                    "models": dict(self._models)
+                }
+                content = orjson.dumps(data)
+                await asyncio.to_thread(self.file_path.write_bytes, content)
+        except Exception as e:
+            logger.error(f"[Stats] 保存数据失败: {e}")
     
-    def record_request(self, model: str, success: bool) -> None:
+    async def record_request(self, model: str, success: bool) -> None:
         """记录一次请求"""
+        if not self._loaded:
+            await self.init()
+            
         now = datetime.now()
         hour_key = now.strftime("%Y-%m-%dT%H")
         day_key = now.strftime("%Y-%m-%d")
@@ -56,6 +124,9 @@ class RequestStats:
         
         # 定期清理旧数据
         self._cleanup()
+        
+        # 异步保存
+        asyncio.create_task(self._save_data())
     
     def _cleanup(self) -> None:
         """清理过期数据"""
@@ -122,11 +193,12 @@ class RequestStats:
             }
         }
     
-    def reset(self) -> None:
+    async def reset(self) -> None:
         """重置所有统计"""
         self._hourly.clear()
         self._daily.clear()
         self._models.clear()
+        await self._save_data()
 
 
 # 全局实例

@@ -72,6 +72,18 @@ async def lifespan(app: FastAPI):
     await token_manager._load_data()
     logger.info("[Grok2API] Token数据加载完成")
     
+    # 3.5. 加载 API Key 数据
+    from app.services.api_keys import api_key_manager
+    await api_key_manager.init()
+    logger.info("[Grok2API] API Key数据加载完成")
+
+    # 3.6. 加载统计和日志数据
+    from app.services.request_stats import request_stats
+    from app.services.request_logger import request_logger
+    await request_stats.init()
+    await request_logger.init()
+    logger.info("[Grok2API] 统计和日志数据加载完成")
+    
     # 4. 启动批量保存任务
     await token_manager.start_batch_save()
 
