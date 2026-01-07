@@ -101,6 +101,7 @@ async def lifespan(app: FastAPI):
 
 # 初始化日志
 logger.info("[Grok2API] 应用正在启动...")
+logger.info("[Grok2API] Fork 版本维护: @Tomiya233")
 
 # 创建FastAPI应用
 app = FastAPI(
