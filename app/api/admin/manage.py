@@ -1,6 +1,7 @@
 """管理接口 - Token管理和系统配置"""
 
 import secrets
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -62,6 +63,11 @@ class TokenInfo(BaseModel):
     status: str
     tags: List[str] = []
     note: str = ""
+    cooldown_until: Optional[int] = None
+    cooldown_remaining: int = 0
+    last_failure_time: Optional[int] = None
+    last_failure_reason: str = ""
+    limit_reason: str = ""
 
 
 class TokenListResponse(BaseModel):
@@ -113,30 +119,71 @@ def parse_created_time(created_time) -> Optional[int]:
     return None
 
 
+def _get_cooldown_remaining_ms(token_data: Dict[str, Any], now_ms: Optional[int] = None) -> int:
+    """获取冷却剩余时间（毫秒）."""
+    cooldown_until = token_data.get("cooldownUntil")
+    if not cooldown_until:
+        return 0
+
+    try:
+        now = now_ms if now_ms is not None else int(time.time() * 1000)
+        remaining = int(cooldown_until) - now
+        return remaining if remaining > 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_token_in_cooldown(token_data: Dict[str, Any], now_ms: Optional[int] = None) -> bool:
+    """判断Token是否处于429冷却中."""
+    return _get_cooldown_remaining_ms(token_data, now_ms) > 0
+
+
 def calculate_token_stats(tokens: Dict[str, Any], token_type: str) -> Dict[str, int]:
-    """计算Token统计"""
+    """计算Token统计."""
     total = len(tokens)
     expired = sum(1 for t in tokens.values() if t.get("status") == "expired")
+    now_ms = int(time.time() * 1000)
+    cooldown = 0
+    exhausted = 0
+    unused = 0
+    active = 0
 
-    if token_type == "normal":
-        unused = sum(1 for t in tokens.values()
-                    if t.get("status") != "expired" and t.get("remainingQueries", -1) == -1)
-        limited = sum(1 for t in tokens.values()
-                     if t.get("status") != "expired" and t.get("remainingQueries", -1) == 0)
-        active = sum(1 for t in tokens.values()
-                    if t.get("status") != "expired" and t.get("remainingQueries", -1) > 0)
-    else:
-        unused = sum(1 for t in tokens.values()
-                    if t.get("status") != "expired" and
-                    t.get("remainingQueries", -1) == -1 and t.get("heavyremainingQueries", -1) == -1)
-        limited = sum(1 for t in tokens.values()
-                     if t.get("status") != "expired" and
-                     (t.get("remainingQueries", -1) == 0 or t.get("heavyremainingQueries", -1) == 0))
-        active = sum(1 for t in tokens.values()
-                    if t.get("status") != "expired" and
-                    (t.get("remainingQueries", -1) > 0 or t.get("heavyremainingQueries", -1) > 0))
+    for token_data in tokens.values():
+        if token_data.get("status") == "expired":
+            continue
 
-    return {"total": total, "unused": unused, "limited": limited, "expired": expired, "active": active}
+        if _is_token_in_cooldown(token_data, now_ms):
+            cooldown += 1
+            continue
+
+        remaining = token_data.get("remainingQueries", -1)
+        heavy_remaining = token_data.get("heavyremainingQueries", -1)
+
+        if token_type == "normal":
+            if remaining == -1:
+                unused += 1
+            elif remaining == 0:
+                exhausted += 1
+            else:
+                active += 1
+        else:
+            if remaining == -1 and heavy_remaining == -1:
+                unused += 1
+            elif remaining == 0 or heavy_remaining == 0:
+                exhausted += 1
+            else:
+                active += 1
+
+    limited = cooldown + exhausted
+    return {
+        "total": total,
+        "unused": unused,
+        "limited": limited,
+        "cooldown": cooldown,
+        "exhausted": exhausted,
+        "expired": expired,
+        "active": active
+    }
 
 
 def verify_admin_session(authorization: Optional[str] = Header(None)) -> bool:
@@ -157,21 +204,28 @@ def verify_admin_session(authorization: Optional[str] = Header(None)) -> bool:
 
 
 def get_token_status(token_data: Dict[str, Any], token_type: str) -> str:
-    """获取Token状态"""
+    """获取Token状态."""
     if token_data.get("status") == "expired":
         return "失效"
-    
+
+    if _is_token_in_cooldown(token_data):
+        return "冷却中"
+
     remaining = token_data.get("remainingQueries", -1)
     heavy_remaining = token_data.get("heavyremainingQueries", -1)
-    
-    relevant = max(remaining, heavy_remaining) if token_type == "ssoSuper" else remaining
-    
-    if relevant == -1:
-        return "未使用"
-    elif relevant == 0:
-        return "限流中"
-    else:
+
+    if token_type == "ssoSuper":
+        if remaining == -1 and heavy_remaining == -1:
+            return "未使用"
+        if remaining == 0 or heavy_remaining == 0:
+            return "额度耗尽"
         return "正常"
+
+    if remaining == -1:
+        return "未使用"
+    if remaining == 0:
+        return "额度耗尽"
+    return "正常"
 
 
 def _calculate_dir_size(directory: Path) -> int:
@@ -267,9 +321,15 @@ async def list_tokens(_: bool = Depends(verify_admin_session)) -> TokenListRespo
 
         all_tokens = token_manager.get_tokens()
         token_list: List[TokenInfo] = []
+        now_ms = int(time.time() * 1000)
 
         # 普通Token
         for token, data in all_tokens.get(TokenType.NORMAL.value, {}).items():
+            cooldown_remaining_ms = _get_cooldown_remaining_ms(data, now_ms)
+            cooldown_until = data.get("cooldownUntil") if cooldown_remaining_ms else None
+            limit_reason = "cooldown" if cooldown_remaining_ms else ""
+            if not limit_reason and data.get("remainingQueries", -1) == 0:
+                limit_reason = "exhausted"
             token_list.append(TokenInfo(
                 token=token,
                 token_type="sso",
@@ -278,11 +338,21 @@ async def list_tokens(_: bool = Depends(verify_admin_session)) -> TokenListRespo
                 heavy_remaining_queries=data.get("heavyremainingQueries", -1),
                 status=get_token_status(data, "sso"),
                 tags=data.get("tags", []),
-                note=data.get("note", "")
+                note=data.get("note", ""),
+                cooldown_until=cooldown_until,
+                cooldown_remaining=(cooldown_remaining_ms + 999) // 1000 if cooldown_remaining_ms else 0,
+                last_failure_time=data.get("lastFailureTime") or None,
+                last_failure_reason=data.get("lastFailureReason") or "",
+                limit_reason=limit_reason
             ))
 
         # Super Token
         for token, data in all_tokens.get(TokenType.SUPER.value, {}).items():
+            cooldown_remaining_ms = _get_cooldown_remaining_ms(data, now_ms)
+            cooldown_until = data.get("cooldownUntil") if cooldown_remaining_ms else None
+            limit_reason = "cooldown" if cooldown_remaining_ms else ""
+            if not limit_reason and (data.get("remainingQueries", -1) == 0 or data.get("heavyremainingQueries", -1) == 0):
+                limit_reason = "exhausted"
             token_list.append(TokenInfo(
                 token=token,
                 token_type="ssoSuper",
@@ -291,7 +361,12 @@ async def list_tokens(_: bool = Depends(verify_admin_session)) -> TokenListRespo
                 heavy_remaining_queries=data.get("heavyremainingQueries", -1),
                 status=get_token_status(data, "ssoSuper"),
                 tags=data.get("tags", []),
-                note=data.get("note", "")
+                note=data.get("note", ""),
+                cooldown_until=cooldown_until,
+                cooldown_remaining=(cooldown_remaining_ms + 999) // 1000 if cooldown_remaining_ms else 0,
+                last_failure_time=data.get("lastFailureTime") or None,
+                last_failure_reason=data.get("lastFailureReason") or "",
+                limit_reason=limit_reason
             ))
 
         logger.debug(f"[Admin] Token列表获取成功: {len(token_list)}个")
@@ -609,8 +684,28 @@ async def test_token(request: TestTokenRequest, _: bool = Depends(verify_admin_s
             if token_data:
                 if token_data.get("status") == "expired":
                     return {"success": False, "message": "Token已失效", "data": {"valid": False, "error_type": "expired", "error_code": 401}}
-                elif token_data.get("remainingQueries") == 0:
-                    return {"success": False, "message": "Token已被限流", "data": {"valid": False, "error_type": "limited", "error_code": "other"}}
+                cooldown_remaining_ms = _get_cooldown_remaining_ms(token_data)
+                if cooldown_remaining_ms:
+                    return {
+                        "success": False,
+                        "message": "Token处于冷却中",
+                        "data": {
+                            "valid": False,
+                            "error_type": "cooldown",
+                            "error_code": 429,
+                            "cooldown_remaining": (cooldown_remaining_ms + 999) // 1000
+                        }
+                    }
+
+                exhausted = token_data.get("remainingQueries") == 0
+                if token_type == TokenType.SUPER and token_data.get("heavyremainingQueries") == 0:
+                    exhausted = True
+                if exhausted:
+                    return {
+                        "success": False,
+                        "message": "Token额度耗尽",
+                        "data": {"valid": False, "error_type": "exhausted", "error_code": "quota_exhausted"}
+                    }
                 else:
                     return {"success": False, "message": "服务器被block或网络错误", "data": {"valid": False, "error_type": "blocked", "error_code": 403}}
             else:
