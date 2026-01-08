@@ -6,7 +6,7 @@
 set -e
 
 # 配置
-BASE_URL="${BASE_URL:-http://localhost:8001}"
+BASE_URL="${BASE_URL:-http://localhost:8000}"
 API_KEY="${API_KEY:-}"
 CONCURRENCY="${CONCURRENCY:-10}"
 TOTAL_REQUESTS="${TOTAL_REQUESTS:-50}"

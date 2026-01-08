@@ -226,7 +226,7 @@ class ConcurrencyTester:
 async def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='Grok2API 并发性能测试')
-    parser.add_argument('--url', default='http://localhost:8001', help='API 基础URL')
+    parser.add_argument('--url', default='http://localhost:8000', help='API 基础URL')
     parser.add_argument('--key', default='', help='API Key（可选）')
     parser.add_argument('-c', '--concurrency', type=int, default=10, help='并发数')
     parser.add_argument('-n', '--requests', type=int, default=50, help='总请求数')
