@@ -53,6 +53,15 @@ function buildVideoTag(src: string): string {
   return `<video src="${src}" controls="controls" width="500" height="300"></video>\n`;
 }
 
+function encodeAssetPath(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return u.pathname.replace(/^\/+/, "").replaceAll("/", "-");
+  } catch {
+    return raw.replace(/^\/+/, "").replaceAll("/", "-");
+  }
+}
+
 export function createOpenAiStreamFromGrokNdjson(
   grokResp: Response,
   opts: {
@@ -210,7 +219,7 @@ export function createOpenAiStreamFromGrokNdjson(
               }
 
               if (videoUrl) {
-                const videoPath = videoUrl.replaceAll("/", "-");
+                const videoPath = encodeAssetPath(videoUrl);
                 const src = toImgProxyUrl(global, origin, videoPath);
                 controller.enqueue(encoder.encode(makeChunk(id, created, currentModel, buildVideoTag(src))));
               }
@@ -228,7 +237,7 @@ export function createOpenAiStreamFromGrokNdjson(
                   const linesOut: string[] = [];
                   for (const u of urls) {
                     if (typeof u !== "string") continue;
-                    const imgPath = u.replaceAll("/", "-");
+                    const imgPath = encodeAssetPath(u);
                     const imgUrl = toImgProxyUrl(global, origin, imgPath);
                     linesOut.push(`![Generated Image](${imgUrl})`);
                   }
@@ -347,7 +356,7 @@ export async function parseOpenAiFromGrokNdjson(
 
     const videoResp = grok.streamingVideoGenerationResponse;
     if (videoResp?.videoUrl && typeof videoResp.videoUrl === "string") {
-      const videoPath = videoResp.videoUrl.replaceAll("/", "-");
+      const videoPath = encodeAssetPath(videoResp.videoUrl);
       const src = toImgProxyUrl(global, origin, videoPath);
       content = buildVideoTag(src);
       model = requestedModel;
@@ -364,7 +373,7 @@ export async function parseOpenAiFromGrokNdjson(
     const urls = Array.isArray(modelResp.generatedImageUrls) ? modelResp.generatedImageUrls : [];
     for (const u of urls) {
       if (typeof u !== "string") continue;
-      const imgPath = u.replaceAll("/", "-");
+      const imgPath = encodeAssetPath(u);
       const imgUrl = toImgProxyUrl(global, origin, imgPath);
       content += `\n![Generated Image](${imgUrl})`;
     }

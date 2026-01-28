@@ -100,8 +100,22 @@ function toUpstreamHeaders(args: { pathname: string; cookie: string; settings: A
 
 mediaRoutes.get("/images/:imgPath{.+}", async (c) => {
   const imgPath = c.req.param("imgPath");
-  const originalPath = `/${imgPath.replaceAll("-", "/")}`;
-  const url = new URL(`https://assets.grok.com${originalPath}`);
+
+  const decoded = imgPath.replaceAll("-", "/");
+  let upstreamPath = decoded;
+  if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
+    try {
+      const u = new URL(decoded);
+      upstreamPath = u.pathname;
+    } catch {
+      upstreamPath = decoded;
+    }
+  }
+  if (!upstreamPath.startsWith("/")) upstreamPath = `/${upstreamPath}`;
+  upstreamPath = upstreamPath.replace(/\/{2,}/g, "/");
+
+  const originalPath = upstreamPath;
+  const url = new URL(`https://assets.grok.com${upstreamPath}`);
   const type = detectTypeByPath(originalPath);
   const key = r2Key(type, imgPath);
   const cacheSeconds = guessCacheSeconds(originalPath);
