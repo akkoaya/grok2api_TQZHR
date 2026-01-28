@@ -79,6 +79,15 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Node / Cloudflare Workers
+node_modules/
+.wrangler/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.dev.vars
+.env
+
 # IPython
 profile_default/
 ipython_config.py

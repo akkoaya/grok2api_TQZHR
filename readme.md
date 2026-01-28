@@ -1,5 +1,9 @@
 # Grok2API
 
+## Cloudflare Workers / Pages 部署
+
+请查看：`README.cloudflare.md`
+
 基于 **FastAPI** 重构的 Grok2API，全面适配最新 Web 调用格式，支持流式对话、图像生成、图像编辑、联网搜索、深度思考，号池并发与自动负载均衡一体化。
 
 ## 🆕 Fork 增强功能
