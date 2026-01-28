@@ -53,12 +53,19 @@ function buildVideoTag(src: string): string {
   return `<video src="${src}" controls="controls" width="500" height="300"></video>\n`;
 }
 
+function base64UrlEncode(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
 function encodeAssetPath(raw: string): string {
   try {
     const u = new URL(raw);
-    return u.pathname.replace(/^\/+/, "").replaceAll("/", "-");
+    return `p_${base64UrlEncode(u.pathname)}`;
   } catch {
-    return raw.replace(/^\/+/, "").replaceAll("/", "-");
+    return `p_${base64UrlEncode(raw.startsWith("/") ? raw : `/${raw}`)}`;
   }
 }
 

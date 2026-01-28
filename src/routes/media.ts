@@ -32,6 +32,44 @@ function parseIntSafe(v: string | undefined, fallback: number): number {
   return Math.floor(n);
 }
 
+function base64UrlDecode(input: string): string {
+  const s = input.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const binary = atob(s + pad);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function isUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+// Legacy decoder for paths like:
+// users-<uuid>-generated-<uuid>-image.jpg  -> /users/<uuid>/generated/<uuid>/image.jpg
+function decodeLegacyHyphenPath(imgPath: string): string | null {
+  const marker = "-generated-";
+  const idx = imgPath.indexOf(marker);
+  if (idx <= 0) return null;
+
+  const left = imgPath.slice(0, idx);
+  const right = imgPath.slice(idx + marker.length);
+
+  if (!left.startsWith("users-")) return null;
+  const userId = left.slice("users-".length);
+  if (!isUuid(userId)) return null;
+
+  // right: <uuid>-<filename>
+  if (right.length < 36 + 1) return null;
+  const genId = right.slice(0, 36);
+  if (!isUuid(genId)) return null;
+  if (right[36] !== "-") return null;
+  const filename = right.slice(37);
+  if (!filename) return null;
+
+  return `/users/${userId}/generated/${genId}/${filename}`;
+}
+
 function responseFromBytes(args: {
   bytes: ArrayBuffer;
   contentType: string;
@@ -101,16 +139,32 @@ function toUpstreamHeaders(args: { pathname: string; cookie: string; settings: A
 mediaRoutes.get("/images/:imgPath{.+}", async (c) => {
   const imgPath = c.req.param("imgPath");
 
-  const decoded = imgPath.replaceAll("-", "/");
-  let upstreamPath = decoded;
-  if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
+  let upstreamPath: string | null = null;
+
+  // New encoding: p_<base64url(pathname)>
+  if (imgPath.startsWith("p_")) {
     try {
-      const u = new URL(decoded);
-      upstreamPath = u.pathname;
+      upstreamPath = base64UrlDecode(imgPath.slice(2));
     } catch {
-      upstreamPath = decoded;
+      upstreamPath = null;
     }
   }
+
+  // Legacy encoding (best-effort): users-<uuid>-generated-<uuid>-image.jpg
+  if (!upstreamPath) upstreamPath = decodeLegacyHyphenPath(imgPath);
+
+  // Very old encoding (lossy): replace '-' with '/' (breaks UUIDs)
+  if (!upstreamPath) upstreamPath = `/${imgPath.replaceAll("-", "/")}`;
+
+  // If upstreamPath accidentally contains a full URL, extract pathname.
+  if (upstreamPath.startsWith("http://") || upstreamPath.startsWith("https://")) {
+    try {
+      upstreamPath = new URL(upstreamPath).pathname;
+    } catch {
+      // keep as-is
+    }
+  }
+
   if (!upstreamPath.startsWith("/")) upstreamPath = `/${upstreamPath}`;
   upstreamPath = upstreamPath.replace(/\/{2,}/g, "/");
 
