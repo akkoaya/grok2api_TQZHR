@@ -25,7 +25,7 @@ import {
   updateTokenLimits,
 } from "../repo/tokens";
 import { checkRateLimits } from "../grok/rateLimits";
-import { addRequestLog, clearRequestLogs, getRequestLogs } from "../repo/logs";
+import { addRequestLog, clearRequestLogs, getRequestLogs, getRequestStats } from "../repo/logs";
 import { getRefreshProgress, setRefreshProgress } from "../repo/refreshProgress";
 import {
   deleteCacheRows,
@@ -356,6 +356,15 @@ adminRoutes.get("/api/stats", requireAdminAuth, async (c) => {
     return c.json({ success: true, data: { normal, super: superStats, total: normal.total + superStats.total } });
   } catch (e) {
     return c.json(jsonError(`获取失败: ${e instanceof Error ? e.message : String(e)}`, "STATS_ERROR"), 500);
+  }
+});
+
+adminRoutes.get("/api/request-stats", requireAdminAuth, async (c) => {
+  try {
+    const stats = await getRequestStats(c.env.DB);
+    return c.json({ success: true, data: stats });
+  } catch (e) {
+    return c.json(jsonError(`获取失败: ${e instanceof Error ? e.message : String(e)}`, "REQUEST_STATS_ERROR"), 500);
   }
 });
 

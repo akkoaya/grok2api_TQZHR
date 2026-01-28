@@ -142,25 +142,37 @@ mediaRoutes.get("/images/:imgPath{.+}", async (c) => {
   const contentLengthHeader = upstream.headers.get("content-length") ?? "";
   const contentLength = contentLengthHeader ? Number(contentLengthHeader) : NaN;
   const maxBytes = Math.min(25 * 1024 * 1024, Math.max(1, parseIntSafe(c.env.KV_CACHE_MAX_BYTES, 25 * 1024 * 1024)));
-  const canCache = !rangeHeader && Number.isFinite(contentLength) && contentLength > 0 && contentLength <= maxBytes;
+  const shouldTryCache =
+    !rangeHeader &&
+    (!Number.isFinite(contentLength) || (contentLength > 0 && contentLength <= maxBytes));
 
-  if (canCache) {
-    const [toKv, toClient] = upstream.body.tee();
+  if (shouldTryCache) {
+    const [toKvRaw, toClient] = upstream.body.tee();
     const tzOffset = parseIntSafe(c.env.CACHE_RESET_TZ_OFFSET_MINUTES, 480);
     const expiresAt = nextLocalMidnightExpirationSeconds(nowMs(), tzOffset);
 
     c.executionCtx.waitUntil(
       (async () => {
         try {
+          let byteCount = 0;
+          const limiter = new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              byteCount += chunk.byteLength;
+              if (byteCount > maxBytes) throw new Error("KV value too large");
+              controller.enqueue(chunk);
+            },
+          });
+          const toKv = toKvRaw.pipeThrough(limiter);
+
           await c.env.KV_CACHE.put(key, toKv, {
             expiration: expiresAt,
-            metadata: { contentType, size: contentLength, type },
+            metadata: { contentType, size: Number.isFinite(contentLength) ? contentLength : byteCount, type },
           });
           const now = nowMs();
           await upsertCacheRow(c.env.DB, {
             key,
             type,
-            size: contentLength,
+            size: Number.isFinite(contentLength) ? contentLength : byteCount,
             content_type: contentType,
             created_at: now,
             last_access_at: now,
