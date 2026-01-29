@@ -43,8 +43,18 @@ jobs:
           account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
           if not token or not account_id:
               raise SystemExit("Missing CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID")
+
+          src_path = "wrangler.toml"
+          dst_path = "wrangler.ci.toml"
+          wrangler_text = open(src_path, "r", encoding="utf-8").read()
+
+          def extract(pattern: str, fallback: str) -> str:
+              m = re.search(pattern, wrangler_text)
+              return m.group(1).strip() if m and m.group(1).strip() else fallback
+
+          worker_name = extract(r'(?m)^name\\s*=\\s*\"([^\"]+)\"\\s*$', "grok2api")
           
-          kv_title = "grok2api-cache"
+          kv_title = f"{worker_name}-cache"
           kv_base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces"
           
           def request(method: str, url: str, data=None):
@@ -79,7 +89,7 @@ jobs:
               kv_id = res["result"]["id"]
 
           # === Ensure D1 database ===
-          d1_name = "grok2api"
+          d1_name = extract(r'(?m)^database_name\\s*=\\s*\"([^\"]+)\"\\s*$', worker_name)
           d1_base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database"
 
           d1_id = None
@@ -106,11 +116,8 @@ jobs:
               d1_id = res.get("result", {}).get("uuid") or res.get("result", {}).get("id")
               if not d1_id:
                   raise RuntimeError({"error": "Missing D1 database id", "response": res})
-          
-          src_path = "wrangler.toml"
-          dst_path = "wrangler.ci.toml"
-          text = open(src_path, "r", encoding="utf-8").read()
-          text2 = text
+
+          text2 = wrangler_text
           text2 = re.sub(r'REPLACE_WITH_KV_NAMESPACE_ID', kv_id, text2)
           text2 = re.sub(r'REPLACE_WITH_D1_DATABASE_ID', d1_id, text2)
           open(dst_path, "w", encoding="utf-8").write(text2)
