@@ -2,7 +2,24 @@
 
 ## Cloudflare Workers / Pages 部署
 
-请查看：`README.cloudflare.md`
+### 一键部署（GitHub Actions，推荐）
+
+只需要在 GitHub 仓库配置 2 个 Secrets，即可一键部署到 Cloudflare Workers（并自动创建/绑定 D1 + KV）：
+
+1. Fork 本仓库
+2. GitHub → Settings → Secrets and variables → Actions 添加：
+   - `CLOUDFLARE_API_TOKEN`
+   - `CLOUDFLARE_ACCOUNT_ID`
+3. push 到 `main`（或在 Actions 页面手动运行 `Deploy to Cloudflare Workers` 工作流）
+
+工作流会自动：
+- 创建/复用 D1 数据库（名称取自 `wrangler.toml` 的 `database_name`）
+- 创建/复用 KV Namespace（名称默认为 `<worker_name>-cache`，即 `grok2api-cache`）
+- 生成 `wrangler.ci.toml` 并执行 D1 migrations + 部署 Worker
+
+### 手动部署
+
+手动部署与更完整的说明请查看：`README.cloudflare.md`
 
 基于 **FastAPI** 重构的 Grok2API，全面适配最新 Web 调用格式，支持流式对话、图像生成、图像编辑、联网搜索、深度思考，号池并发与自动负载均衡一体化。
 
