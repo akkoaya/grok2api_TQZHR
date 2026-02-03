@@ -2,10 +2,10 @@ name = "grok2api"
 main = "src/index.ts"
 compatibility_date = "2026-01-28"
 
-# Prefer running close to upstream origins (often improving outbound/egress locality).
-# This can help bias execution/egress toward the region where your upstream is hosted (e.g. US).
+# Hard-pin execution closer to the US to make egress locality more stable.
+# Docs: https://developers.cloudflare.com/workers/platform/placement/
 [placement]
-mode = "smart"
+region = "aws:us-east-1"
 
 # Static assets (admin UI)
 assets = { directory = "./app/template", binding = "ASSETS" }
