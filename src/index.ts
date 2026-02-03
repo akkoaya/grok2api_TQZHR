@@ -4,6 +4,7 @@ import { openAiRoutes } from "./routes/openai";
 import { mediaRoutes } from "./routes/media";
 import { adminRoutes } from "./routes/admin";
 import { runKvDailyClear } from "./kv/cleanup";
+export { AutoRegisterJob } from "./durable/autoRegisterJob";
 
 const app = new Hono<{ Bindings: Env }>();
 

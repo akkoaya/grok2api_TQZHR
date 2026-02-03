@@ -22,6 +22,14 @@ binding = "KV_CACHE"
 # Filled by CI / your first deployment bootstrap.
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
+[[durable_objects.bindings]]
+name = "AUTO_REGISTER"
+class_name = "AutoRegisterJob"
+
+[[migrations]]
+tag = "do-v1"
+new_classes = ["AutoRegisterJob"]
+
 [vars]
 # Daily reset at local midnight (default: Asia/Shanghai, UTC+8).
 # Make sure the cron below matches this offset.
