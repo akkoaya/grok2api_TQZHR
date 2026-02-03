@@ -33,7 +33,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          python - <<'PY'
+          python -u - <<'PY'
           import json
           import os
           import re
@@ -46,6 +46,7 @@ jobs:
 
           src_path = "wrangler.toml"
           dst_path = "wrangler.ci.toml"
+          print(f"Reading {src_path}...", flush=True)
           wrangler_text = open(src_path, "r", encoding="utf-8").read()
 
           def extract(pattern: str, fallback: str) -> str:
@@ -56,6 +57,7 @@ jobs:
           
           kv_title = f"{worker_name}-cache"
           kv_base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces"
+          print(f"Ensuring KV namespace: {kv_title}", flush=True)
           
           def request(method: str, url: str, data=None):
               headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -68,6 +70,7 @@ jobs:
           kv_id = None
           page = 1
           while True:
+              print(f"KV list page={page}...", flush=True)
               res = request("GET", f"{kv_base}?per_page=100&page={page}")
               if not res.get("success"):
                   raise RuntimeError(res)
@@ -83,6 +86,7 @@ jobs:
               page += 1
           
           if not kv_id:
+              print("KV namespace not found; creating...", flush=True)
               res = request("POST", kv_base, {"title": kv_title})
               if not res.get("success"):
                   raise RuntimeError(res)
@@ -91,10 +95,12 @@ jobs:
           # === Ensure D1 database ===
           d1_name = extract(r'(?m)^database_name\\s*=\\s*\"([^\"]+)\"\\s*$', worker_name)
           d1_base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database"
+          print(f"Ensuring D1 database: {d1_name}", flush=True)
 
           d1_id = None
           page = 1
           while True:
+              print(f"D1 list page={page}...", flush=True)
               res = request("GET", f"{d1_base}?per_page=100&page={page}")
               if not res.get("success"):
                   raise RuntimeError(res)
@@ -110,6 +116,7 @@ jobs:
               page += 1
 
           if not d1_id:
+              print("D1 database not found; creating...", flush=True)
               res = request("POST", d1_base, {"name": d1_name})
               if not res.get("success"):
                   raise RuntimeError(res)
@@ -117,6 +124,7 @@ jobs:
               if not d1_id:
                   raise RuntimeError({"error": "Missing D1 database id", "response": res})
 
+          print("Generating wrangler.ci.toml...", flush=True)
           text2 = wrangler_text
           # Replace placeholders (default) and also force-set ids in case the template
           # already contains other values.
@@ -140,7 +148,7 @@ jobs:
 
       - name: Verify US placement
         run: |
-          python - <<'PY'
+          python -u - <<'PY'
           import tomllib
 
           with open("wrangler.ci.toml", "rb") as f:
