@@ -63,3 +63,6 @@ htmlcov/
 
 # Project specific
 config.local.toml
+
+# Local tooling
+.ace-tool/

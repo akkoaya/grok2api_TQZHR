@@ -91,6 +91,29 @@ function encodeAssetPath(raw: string): string {
   }
 }
 
+function normalizeGeneratedAssetUrls(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+
+  const out: string[] = [];
+  for (const v of input) {
+    if (typeof v !== "string") continue;
+    const s = v.trim();
+    if (!s) continue;
+    if (s === "/") continue;
+
+    try {
+      const u = new URL(s);
+      if (u.pathname === "/" && !u.search && !u.hash) continue;
+    } catch {
+      // ignore (path-style strings are allowed)
+    }
+
+    out.push(s);
+  }
+
+  return out;
+}
+
 export function createOpenAiStreamFromGrokNdjson(
   grokResp: Response,
   opts: {
@@ -282,11 +305,10 @@ export function createOpenAiStreamFromGrokNdjson(
             if (isImage) {
               const modelResp = grok.modelResponse;
               if (modelResp) {
-                const urls = Array.isArray(modelResp.generatedImageUrls) ? modelResp.generatedImageUrls : [];
+                const urls = normalizeGeneratedAssetUrls(modelResp.generatedImageUrls);
                 if (urls.length) {
                   const linesOut: string[] = [];
                   for (const u of urls) {
-                    if (typeof u !== "string") continue;
                     const imgPath = encodeAssetPath(u);
                     const imgUrl = toImgProxyUrl(global, origin, imgPath);
                     linesOut.push(`![Generated Image](${imgUrl})`);
@@ -431,13 +453,21 @@ export async function parseOpenAiFromGrokNdjson(
     if (typeof modelResp.model === "string" && modelResp.model) model = modelResp.model;
     if (typeof modelResp.message === "string") content = modelResp.message;
 
-    const urls = Array.isArray(modelResp.generatedImageUrls) ? modelResp.generatedImageUrls : [];
-    for (const u of urls) {
-      if (typeof u !== "string") continue;
-      const imgPath = encodeAssetPath(u);
-      const imgUrl = toImgProxyUrl(global, origin, imgPath);
-      content += `\n![Generated Image](${imgUrl})`;
+    const rawUrls = modelResp.generatedImageUrls;
+    const urls = normalizeGeneratedAssetUrls(rawUrls);
+    if (urls.length) {
+      for (const u of urls) {
+        const imgPath = encodeAssetPath(u);
+        const imgUrl = toImgProxyUrl(global, origin, imgPath);
+        content += `\n![Generated Image](${imgUrl})`;
+      }
+      break;
     }
+
+    // If upstream emits placeholder/empty generatedImageUrls in intermediate frames, keep scanning.
+    if (Array.isArray(rawUrls) && rawUrls.length > 0) continue;
+
+    // For normal chat replies, the first modelResponse is enough.
     break;
   }
 
