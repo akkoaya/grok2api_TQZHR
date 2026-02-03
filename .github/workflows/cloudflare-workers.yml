@@ -151,12 +151,21 @@ jobs:
               raise SystemExit(
                   'wrangler.ci.toml: missing required [placement] region = "aws:us-east-1"'
               )
+          def normalize_dir(v: str) -> str:
+              s = (v or "").strip().replace("\\\\", "/")
+              while s.startswith("./"):
+                  s = s[2:]
+              s = s.rstrip("/")
+              return s
+
           assets = data.get("assets") or {}
-          directory = (assets.get("directory") or "").strip()
+          directory = normalize_dir(assets.get("directory") or "")
           binding = (assets.get("binding") or "").strip()
-          if directory != "./app/template" or binding != "ASSETS":
+          if directory != "app/template" or binding != "ASSETS":
               raise SystemExit(
-                  'wrangler.ci.toml: missing required assets = { directory = "./app/template", binding = "ASSETS" }'
+                  'wrangler.ci.toml: missing required assets binding. '
+                  f'Expected directory="./app/template" (or "app/template") and binding="ASSETS", '
+                  f'got directory={assets.get("directory")!r}, binding={assets.get("binding")!r}'
               )
           print("OK: placement.region = aws:us-east-1")
           PY
