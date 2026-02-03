@@ -151,6 +151,13 @@ jobs:
               raise SystemExit(
                   'wrangler.ci.toml: missing required [placement] region = "aws:us-east-1"'
               )
+          assets = data.get("assets") or {}
+          directory = (assets.get("directory") or "").strip()
+          binding = (assets.get("binding") or "").strip()
+          if directory != "./app/template" or binding != "ASSETS":
+              raise SystemExit(
+                  'wrangler.ci.toml: missing required assets = { directory = "./app/template", binding = "ASSETS" }'
+              )
           print("OK: placement.region = aws:us-east-1")
           PY
 
