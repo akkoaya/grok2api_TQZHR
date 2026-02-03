@@ -142,7 +142,7 @@ npx wrangler deploy
 
 > 注意：此版本不再使用 R2。GitHub Actions 会自动创建/复用 D1 与 KV，但你仍需在 GitHub 配好 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`。
 >
-> 另外：`app/template/_worker.js` 是 Pages Advanced Mode 的入口文件。Workers 部署时会被 `app/template/.assetsignore` 排除，避免被当成静态资源上传导致部署失败。
+> 另外：`app/static/_worker.js` 是 Pages Advanced Mode 的入口文件。Workers 部署时会被 `app/static/.assetsignore` 排除，避免被当成静态资源上传导致部署失败。
 
 ---
 
@@ -161,7 +161,7 @@ npx wrangler deploy
 
 ## 7) 后台初始化配置（必须）
 
-登录 `/manage` 后至少配置：
+登录 `/admin/token` 后至少配置（`/manage` 仍保留为兼容入口，会跳转）：
 
 1. **Tokens**：添加 `sso` 或 `ssoSuper`
 2. **设置**：
@@ -185,12 +185,12 @@ npx wrangler deploy
 ## 9) 部署到 Pages（可选，但不推荐用于“定时清理”）
 
 仓库已提供 Pages Advanced Mode 入口：
-- `app/template/_worker.js`
+- `app/static/_worker.js`
 
 部署静态目录：
 
 ```bash
-npx wrangler pages deploy app/template --project-name <你的Pages项目名> --commit-dirty
+npx wrangler pages deploy app/static --project-name <你的Pages项目名> --commit-dirty
 ```
 
 然后在 Pages 项目设置里添加绑定（名称必须匹配代码）：

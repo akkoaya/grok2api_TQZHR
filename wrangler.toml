@@ -3,7 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2026-01-28"
 
 # Static assets (admin UI)
-assets = { directory = "./app/template", binding = "ASSETS" }
+assets = { directory = "./app/static", binding = "ASSETS" }
 
 # Hard-pin execution closer to the US to make egress locality more stable.
 # Docs: https://developers.cloudflare.com/workers/platform/placement/

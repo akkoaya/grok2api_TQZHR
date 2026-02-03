@@ -45,7 +45,7 @@ async function fetchAsset(c: any, pathname: string): Promise<Response> {
   if (!assets) {
     console.error("ASSETS binding missing: check wrangler.toml assets binding");
     return assetFetchError(
-      'Internal Server Error: missing ASSETS binding. Check `wrangler.toml` `assets = { directory = \"./app/template\", binding = \"ASSETS\" }` and redeploy.',
+      'Internal Server Error: missing ASSETS binding. Check `wrangler.toml` `assets = { directory = \"./app/static\", binding = \"ASSETS\" }` and redeploy.',
       buildSha,
     );
   }
@@ -83,6 +83,15 @@ app.route("/v1", openAiRoutes);
 app.route("/", mediaRoutes);
 app.route("/", adminRoutes);
 
+// Backward-compatible local-cache viewer URLs used by the multi-page admin UI.
+// In Workers we serve cache via /images/*, so redirect /v1/files/* to /images/*.
+app.get("/v1/files/image/:imgPath{.+}", (c) =>
+  c.redirect(`/images/${encodeURIComponent(c.req.param("imgPath"))}`, 302),
+);
+app.get("/v1/files/video/:imgPath{.+}", (c) =>
+  c.redirect(`/images/${encodeURIComponent(c.req.param("imgPath"))}`, 302),
+);
+
 app.get("/_worker.js", (c) => c.notFound());
 
 app.get("/", (c) => c.redirect("/login", 302));
@@ -91,14 +100,45 @@ app.get("/login", (c) => {
   const buildSha = getBuildSha(c.env as Env);
   const v = c.req.query("v") ?? "";
   if (v !== buildSha) return c.redirect(`/login?v=${encodeURIComponent(buildSha)}`, 302);
-  return fetchAsset(c, "/login.html");
+  return fetchAsset(c, "/login/login.html");
 });
 
+// Legacy (old admin UI): keep /manage as an alias.
 app.get("/manage", (c) => {
   const buildSha = getBuildSha(c.env as Env);
   const v = c.req.query("v") ?? "";
-  if (v !== buildSha) return c.redirect(`/manage?v=${encodeURIComponent(buildSha)}`, 302);
-  return fetchAsset(c, "/admin.html");
+  if (v !== buildSha) return c.redirect(`/admin/token?v=${encodeURIComponent(buildSha)}`, 302);
+  return c.redirect(`/admin/token?v=${encodeURIComponent(buildSha)}`, 302);
+});
+
+app.get("/admin", (c) => c.redirect("/login", 302));
+
+app.get("/admin/token", (c) => {
+  const buildSha = getBuildSha(c.env as Env);
+  const v = c.req.query("v") ?? "";
+  if (v !== buildSha) return c.redirect(`/admin/token?v=${encodeURIComponent(buildSha)}`, 302);
+  return fetchAsset(c, "/token/token.html");
+});
+
+app.get("/admin/datacenter", (c) => {
+  const buildSha = getBuildSha(c.env as Env);
+  const v = c.req.query("v") ?? "";
+  if (v !== buildSha) return c.redirect(`/admin/datacenter?v=${encodeURIComponent(buildSha)}`, 302);
+  return fetchAsset(c, "/datacenter/datacenter.html");
+});
+
+app.get("/admin/config", (c) => {
+  const buildSha = getBuildSha(c.env as Env);
+  const v = c.req.query("v") ?? "";
+  if (v !== buildSha) return c.redirect(`/admin/config?v=${encodeURIComponent(buildSha)}`, 302);
+  return fetchAsset(c, "/config/config.html");
+});
+
+app.get("/admin/cache", (c) => {
+  const buildSha = getBuildSha(c.env as Env);
+  const v = c.req.query("v") ?? "";
+  if (v !== buildSha) return c.redirect(`/admin/cache?v=${encodeURIComponent(buildSha)}`, 302);
+  return fetchAsset(c, "/cache/cache.html");
 });
 
 app.get("/static/*", (c) => {
