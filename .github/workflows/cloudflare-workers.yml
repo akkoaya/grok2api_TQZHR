@@ -124,12 +124,12 @@ jobs:
           text2 = re.sub(r'REPLACE_WITH_D1_DATABASE_ID', d1_id, text2)
           text2 = re.sub(
               r'(?ms)(\[\[kv_namespaces\]\].*?^\s*id\s*=\s*")[^"]*("\s*)$',
-              rf'\1{kv_id}\2',
+              lambda m: f"{m.group(1)}{kv_id}{m.group(2)}",
               text2,
           )
           text2 = re.sub(
               r'(?ms)(\[\[d1_databases\]\].*?^\s*database_id\s*=\s*")[^"]*("\s*)$',
-              rf'\1{d1_id}\2',
+              lambda m: f"{m.group(1)}{d1_id}{m.group(2)}",
               text2,
           )
           open(dst_path, "w", encoding="utf-8").write(text2)
