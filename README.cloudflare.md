@@ -186,3 +186,18 @@ npx wrangler pages deploy app/template --project-name <你的Pages项目名> --c
 
 注意：
 - **自动清理依赖 Cron Trigger**，目前更推荐用 Workers 部署该项目以保证定时清理稳定运行。
+
+---
+
+## 10) Worker 出站更倾向美区（可选）
+
+本仓库默认在 `wrangler.toml` 启用了 Workers Smart Placement：
+
+```toml
+[placement]
+mode = "smart"
+```
+
+该模式会更倾向把 Worker 放在接近上游（例如 Grok/xAI）的区域执行，从而让出站更偏向上游所在区域（通常为美区）。
+
+如需关闭：删除 `wrangler.toml` 中的 `[placement]` 段落即可。

@@ -2,6 +2,11 @@ name = "grok2api"
 main = "src/index.ts"
 compatibility_date = "2026-01-28"
 
+# Prefer running close to upstream origins (often improving outbound/egress locality).
+# This can help bias execution/egress toward the region where your upstream is hosted (e.g. US).
+[placement]
+mode = "smart"
+
 # Static assets (admin UI)
 assets = { directory = "./app/template", binding = "ASSETS" }
 
