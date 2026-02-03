@@ -123,13 +123,13 @@ jobs:
           text2 = re.sub(r'REPLACE_WITH_KV_NAMESPACE_ID', kv_id, text2)
           text2 = re.sub(r'REPLACE_WITH_D1_DATABASE_ID', d1_id, text2)
           text2 = re.sub(
-              r'(?ms)(\\[\\[kv_namespaces\\]\\].*?^\\s*id\\s*=\\s*\")[^\"]*(\"\\s*)$',
-              rf'\\1{kv_id}\\2',
+              r'(?ms)(\[\[kv_namespaces\]\].*?^\s*id\s*=\s*")[^"]*("\s*)$',
+              rf'\1{kv_id}\2',
               text2,
           )
           text2 = re.sub(
-              r'(?ms)(\\[\\[d1_databases\\]\\].*?^\\s*database_id\\s*=\\s*\")[^\"]*(\"\\s*)$',
-              rf'\\1{d1_id}\\2',
+              r'(?ms)(\[\[d1_databases\]\].*?^\s*database_id\s*=\s*")[^"]*("\s*)$',
+              rf'\1{d1_id}\2',
               text2,
           )
           open(dst_path, "w", encoding="utf-8").write(text2)
@@ -141,17 +141,16 @@ jobs:
       - name: Verify US placement
         run: |
           python - <<'PY'
-          import re
-          text = open("wrangler.ci.toml", "r", encoding="utf-8").read()
-          # We hard-pin placement to US to keep egress locality stable.
-          ok = bool(
-              re.search(
-                  r'(?ms)^\\[placement\\]\\s*$.*?^\\s*region\\s*=\\s*\"aws:us-east-1\"\\s*$',
-                  text,
+          import tomllib
+
+          with open("wrangler.ci.toml", "rb") as f:
+              data = tomllib.load(f)
+          placement = data.get("placement") or {}
+          region = (placement.get("region") or "").strip()
+          if region != "aws:us-east-1":
+              raise SystemExit(
+                  'wrangler.ci.toml: missing required [placement] region = "aws:us-east-1"'
               )
-          )
-          if not ok:
-              raise SystemExit('wrangler.ci.toml: missing required [placement] region = \"aws:us-east-1\"')
           print("OK: placement.region = aws:us-east-1")
           PY
 
