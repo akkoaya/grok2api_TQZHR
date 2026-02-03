@@ -1,18 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body
 from fastapi.responses import HTMLResponse
-from app.core.auth import verify_api_key, verify_app_key
+from pydantic import BaseModel
+
+from app.core.auth import verify_api_key
 from app.core.config import config, get_config
 from app.core.storage import get_storage, LocalStorage, RedisStorage, SQLStorage
 import os
 from pathlib import Path
 import aiofiles
 import asyncio
+import json
 from app.core.logger import logger
+from app.services.register import get_auto_register_manager
 
 
 router = APIRouter()
 
 TEMPLATE_DIR = Path(__file__).parent.parent.parent / "static"
+
+
+class AdminLoginBody(BaseModel):
+    username: str | None = None
+    password: str | None = None
 
 async def render_template(filename: str):
     """渲染指定模板"""
@@ -39,9 +48,39 @@ async def admin_token_page():
     """Token 管理页"""
     return await render_template("token/token.html")
 
-@router.post("/api/v1/admin/login", dependencies=[Depends(verify_app_key)])
-async def admin_login_api():
-    """管理后台登录验证（使用 app_key）"""
+@router.get("/admin/datacenter", response_class=HTMLResponse, include_in_schema=False)
+async def admin_datacenter_page():
+    """数据中心页"""
+    return await render_template("datacenter/datacenter.html")
+
+@router.post("/api/v1/admin/login")
+async def admin_login_api(request: Request, body: AdminLoginBody | None = Body(default=None)):
+    """管理后台登录验证（用户名+密码）
+
+    - 默认账号/密码：admin/admin（可在配置管理的「应用设置」里修改）
+    - 兼容旧版本：允许 Authorization: Bearer <password> 仅密码登录（用户名默认为 admin）
+    """
+
+    admin_username = str(get_config("app.admin_username", "admin") or "admin").strip() or "admin"
+    admin_password = str(get_config("app.app_key", "admin") or "admin").strip()
+
+    username = (body.username.strip() if body and isinstance(body.username, str) else "").strip()
+    password = (body.password.strip() if body and isinstance(body.password, str) else "").strip()
+
+    # Legacy: password-only via Bearer token.
+    if not password:
+        auth = request.headers.get("Authorization") or ""
+        if auth.lower().startswith("bearer "):
+            password = auth[7:].strip()
+            if not username:
+                username = "admin"
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Missing username or password")
+
+    if username != admin_username or password != admin_password:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
     return {"status": "success", "api_key": get_config("app.api_key", "")}
 
 @router.get("/api/v1/admin/config", dependencies=[Depends(verify_api_key)])
@@ -132,6 +171,60 @@ async def refresh_tokens_api(data: dict):
         return {"status": "success", "results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/admin/tokens/auto-register", dependencies=[Depends(verify_api_key)])
+async def auto_register_tokens_api(data: dict):
+    """Start auto registration."""
+    try:
+        data = data or {}
+        count = data.get("count")
+        concurrency = data.get("concurrency")
+        pool = (data.get("pool") or "ssoBasic").strip() or "ssoBasic"
+
+        try:
+            count_val = int(count)
+        except Exception:
+            count_val = int(get_config("register.default_count", 100) or 100)
+
+        if count_val <= 0:
+            count_val = int(get_config("register.default_count", 100) or 100)
+
+        try:
+            concurrency_val = int(concurrency)
+        except Exception:
+            concurrency_val = None
+        if concurrency_val is not None and concurrency_val <= 0:
+            concurrency_val = None
+
+        manager = get_auto_register_manager()
+        job = await manager.start_job(count=count_val, pool=pool, concurrency=concurrency_val)
+        return {"status": "started", "job": job.to_dict()}
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/v1/admin/tokens/auto-register/status", dependencies=[Depends(verify_api_key)])
+async def auto_register_status_api(job_id: str | None = None):
+    """Get auto registration status."""
+    manager = get_auto_register_manager()
+    status = manager.get_status(job_id)
+    if status.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="Job not found")
+    return status
+
+
+@router.post("/api/v1/admin/tokens/auto-register/stop", dependencies=[Depends(verify_api_key)])
+async def auto_register_stop_api(job_id: str | None = None):
+    """Stop auto registration (best-effort)."""
+    manager = get_auto_register_manager()
+    status = manager.get_status(job_id)
+    if status.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="Job not found")
+    await manager.stop_job()
+    return {"status": "stopping"}
 
 @router.get("/admin/cache", response_class=HTMLResponse, include_in_schema=False)
 async def admin_cache_page():
@@ -363,3 +456,198 @@ async def clear_online_cache_api(data: dict):
     finally:
         if delete_service:
             await delete_service.close()
+
+
+@router.get("/api/v1/admin/metrics", dependencies=[Depends(verify_api_key)])
+async def get_metrics_api():
+    """数据中心：聚合常用指标（token/cache/request_stats）。"""
+    try:
+        from app.services.request_stats import request_stats
+        from app.services.token.manager import get_token_manager
+        from app.services.token.models import TokenStatus
+        from app.services.grok.assets import DownloadService
+
+        mgr = await get_token_manager()
+        await mgr.reload_if_stale()
+
+        total = 0
+        active = 0
+        cooling = 0
+        expired = 0
+        disabled = 0
+        chat_quota = 0
+        total_calls = 0
+
+        for pool in mgr.pools.values():
+            for info in pool.list():
+                total += 1
+                total_calls += int(getattr(info, "use_count", 0) or 0)
+                if info.status == TokenStatus.ACTIVE:
+                    active += 1
+                    chat_quota += int(getattr(info, "quota", 0) or 0)
+                elif info.status == TokenStatus.COOLING:
+                    cooling += 1
+                elif info.status == TokenStatus.EXPIRED:
+                    expired += 1
+                elif info.status == TokenStatus.DISABLED:
+                    disabled += 1
+
+        dl = DownloadService()
+        local_image = dl.get_stats("image")
+        local_video = dl.get_stats("video")
+
+        await request_stats.init()
+        stats = request_stats.get_stats(hours=24, days=7)
+
+        return {
+            "tokens": {
+                "total": total,
+                "active": active,
+                "cooling": cooling,
+                "expired": expired,
+                "disabled": disabled,
+                "chat_quota": chat_quota,
+                "image_quota": int(chat_quota // 2),
+                "total_calls": total_calls,
+            },
+            "cache": {
+                "local_image": local_image,
+                "local_video": local_video,
+            },
+            "request_stats": stats,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/v1/admin/cache/local", dependencies=[Depends(verify_api_key)])
+async def get_cache_local_stats_api():
+    """仅获取本地缓存统计（用于前端实时刷新）。"""
+    from app.services.grok.assets import DownloadService
+
+    try:
+        dl_service = DownloadService()
+        image_stats = dl_service.get_stats("image")
+        video_stats = dl_service.get_stats("video")
+        return {"local_image": image_stats, "local_video": video_stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _safe_log_file_path(name: str) -> Path:
+    """Resolve a log file name under ./logs safely."""
+    from app.core.logger import LOG_DIR
+
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Missing log file")
+    # Disallow path traversal.
+    if "/" in name or "\\" in name or ".." in name:
+        raise ValueError("Invalid log file name")
+
+    p = (LOG_DIR / name).resolve()
+    if LOG_DIR.resolve() not in p.parents:
+        raise ValueError("Invalid log file path")
+    if not p.exists() or not p.is_file():
+        raise FileNotFoundError(name)
+    return p
+
+
+def _format_log_line(raw: str) -> str:
+    raw = (raw or "").rstrip("\r\n")
+    if not raw:
+        return ""
+
+    # Try JSON log line (our file sink uses json lines).
+    try:
+        obj = json.loads(raw)
+        if not isinstance(obj, dict):
+            return raw
+        ts = str(obj.get("time", "") or "")
+        ts = ts.replace("T", " ")
+        if len(ts) >= 19:
+            ts = ts[:19]
+        level = str(obj.get("level", "") or "").upper()
+        caller = str(obj.get("caller", "") or "")
+        msg = str(obj.get("msg", "") or "")
+        if not (ts and level and msg):
+            return raw
+        return f"{ts} | {level:<8} | {caller} - {msg}".rstrip()
+    except Exception:
+        return raw
+
+
+def _tail_lines(path: Path, max_lines: int = 2000, max_bytes: int = 1024 * 1024) -> list[str]:
+    """Best-effort tail for a text file."""
+    try:
+        max_lines = int(max_lines)
+    except Exception:
+        max_lines = 2000
+    max_lines = max(1, min(5000, max_lines))
+    max_bytes = max(16 * 1024, min(5 * 1024 * 1024, int(max_bytes)))
+
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        end = f.tell()
+        start = max(0, end - max_bytes)
+        f.seek(start, os.SEEK_SET)
+        data = f.read()
+
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    # If we read from the middle of a line, drop the first partial line.
+    if start > 0 and lines:
+        lines = lines[1:]
+    lines = lines[-max_lines:]
+    return [_format_log_line(ln) for ln in lines if ln is not None]
+
+
+@router.get("/api/v1/admin/logs/files", dependencies=[Depends(verify_api_key)])
+async def list_log_files_api():
+    """列出可查看的日志文件（logs/*.log）。"""
+    from app.core.logger import LOG_DIR
+
+    try:
+        items = []
+        for p in LOG_DIR.glob("*.log"):
+            try:
+                stat = p.stat()
+                items.append(
+                    {
+                        "name": p.name,
+                        "size_bytes": stat.st_size,
+                        "mtime_ms": int(stat.st_mtime * 1000),
+                    }
+                )
+            except Exception:
+                continue
+        items.sort(key=lambda x: x["mtime_ms"], reverse=True)
+        return {"files": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/v1/admin/logs/tail", dependencies=[Depends(verify_api_key)])
+async def tail_log_api(file: str | None = None, lines: int = 500):
+    """读取后台日志（尾部）。"""
+    from app.core.logger import LOG_DIR
+
+    try:
+        # Default to latest log.
+        if not file:
+            candidates = sorted(LOG_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+            if not candidates:
+                return {"file": None, "lines": []}
+            path = candidates[0]
+            file = path.name
+        else:
+            path = _safe_log_file_path(file)
+
+        data = await asyncio.to_thread(_tail_lines, path, lines)
+        return {"file": str(file), "lines": data}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Log file not found")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

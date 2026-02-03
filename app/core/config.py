@@ -59,14 +59,17 @@ def _legacy_setting_to_config(legacy: Dict[str, Any]) -> Dict[str, Any]:
 
     # === app ===
     app_url = _as_str(global_.get("base_url")).strip()
+    admin_username = _as_str(global_.get("admin_username")).strip()
     app_key = _as_str(global_.get("admin_password")).strip()
     api_key = _as_str(grok.get("api_key")).strip()
     image_format = _as_str(global_.get("image_mode")).strip()
 
-    if app_url or app_key or api_key or image_format:
+    if app_url or admin_username or app_key or api_key or image_format:
         out["app"] = {}
         if app_url:
             out["app"]["app_url"] = app_url
+        if admin_username:
+            out["app"]["admin_username"] = admin_username
         if app_key:
             out["app"]["app_key"] = app_key
         if api_key:
@@ -169,7 +172,15 @@ def _apply_legacy_config(
                 continue
 
             default_val = default_section.get(key) if isinstance(default_section, dict) else None
-            if current_section.get(key) == default_val and val != default_val:
+            current_val = current_section.get(key)
+
+            # NOTE: The admin panel password default used to be `grok2api` in older versions.
+            # Treat it as "still default" so legacy `data/setting.toml` can override it during migration.
+            is_effective_default = current_val == default_val
+            if section == "app" and key == "app_key" and current_val == "grok2api":
+                is_effective_default = True
+
+            if is_effective_default and val != default_val:
                 current_section[key] = val
                 changed = True
 

@@ -14,6 +14,7 @@ const deleteFailed = new Map();
 let currentBatchAction = null;
 let lastBatchAction = null;
 let isLocalDeleting = false;
+let localStatsTimer = null;
 const cacheListState = {
   image: { loaded: false, visible: false, items: [] },
   video: { loaded: false, visible: false, items: [] }
@@ -28,7 +29,48 @@ async function init() {
   setupFailureDialog();
   setupBatchControls();
   await loadStats();
+  autoLoadOnlineAssets();
+  startLocalStatsRefresh();
   await showCacheSection('image');
+}
+
+function autoLoadOnlineAssets() {
+  // 默认自动加载在线资产统计，避免“未加载/为0”造成误解。
+  try {
+    if (currentScope !== 'none') return;
+    const tokens = Array.from(accountMap.keys());
+    if (!tokens.length) return;
+    startBatchLoad(tokens);
+  } catch (e) {
+    // ignore
+  }
+}
+
+function startLocalStatsRefresh() {
+  if (localStatsTimer) clearInterval(localStatsTimer);
+  localStatsTimer = setInterval(() => {
+    refreshLocalStats();
+  }, 10000);
+}
+
+async function refreshLocalStats() {
+  try {
+    const res = await fetch('/api/v1/admin/cache/local', {
+      headers: buildAuthHeaders(apiKey)
+    });
+    if (res.status === 401) {
+      logout();
+      return;
+    }
+    if (!res.ok) return;
+    const data = await res.json();
+    if (ui.imgCount) ui.imgCount.textContent = data.local_image.count;
+    if (ui.imgSize) ui.imgSize.textContent = `${data.local_image.size_mb} MB`;
+    if (ui.videoCount) ui.videoCount.textContent = data.local_video.count;
+    if (ui.videoSize) ui.videoSize.textContent = `${data.local_video.size_mb} MB`;
+  } catch (e) {
+    // silent
+  }
 }
 
 function setupCacheCards() {
@@ -78,6 +120,15 @@ function cacheUI() {
   ui.failureList = document.getElementById('failure-list');
   ui.failureClose = document.getElementById('failure-close');
   ui.failureRetry = document.getElementById('failure-retry');
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function ensureUI() {
@@ -371,7 +422,14 @@ function renderAccountTable(data) {
     // We'll use the masked version from backend
 
     const rowClass = selectedTokens.has(row.token) ? 'row-selected' : '';
-    const countText = row.count === '-' ? '未加载' : row.count;
+    let countText = '未加载';
+    if (row.status === 'ok') {
+      countText = row.count === '-' ? '0' : String(row.count);
+    } else if (row.status === 'not_loaded') {
+      countText = '未加载';
+    } else {
+      countText = '异常';
+    }
     return `
       <tr class="${rowClass}">
         <td class="text-center">
@@ -383,7 +441,7 @@ function renderAccountTable(data) {
              </div>
         </td>
         <td class="text-center"><span class="badge badge-gray">${row.pool || '-'}</span></td>
-        <td class="text-center"><span class="badge badge-gray">${countText}</span></td>
+        <td class="text-center"><span class="badge ${statusClass}" title="${escapeHtml(row.status)}">${countText}</span></td>
         <td class="text-left text-xs text-gray-500">${lastClear}</td>
         <td class="text-center">
           <div class="flex items-center justify-center gap-2">

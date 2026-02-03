@@ -101,23 +101,52 @@ async function decryptAppKey(stored) {
   return textDecoder.decode(plain);
 }
 
+function parseStoredCreds(plain) {
+  const raw = (plain || '').trim();
+  if (!raw) return { username: '', password: '' };
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object') {
+      const username = typeof obj.username === 'string' ? obj.username.trim() : '';
+      const password = typeof obj.password === 'string' ? obj.password.trim() : '';
+      if (username && password) return { username, password };
+    }
+  } catch (e) { }
+  // Legacy: raw is the password (username defaults to admin)
+  return { username: 'admin', password: raw };
+}
+
+function serializeCreds(creds) {
+  const username = typeof creds?.username === 'string' ? creds.username.trim() : '';
+  const password = typeof creds?.password === 'string' ? creds.password.trim() : '';
+  if (!username || !password) return '';
+  return JSON.stringify({ username, password });
+}
+
 async function getStoredAppKey() {
   const stored = localStorage.getItem(APP_KEY_STORAGE) || '';
-  if (!stored) return '';
+  if (!stored) return { username: '', password: '' };
   try {
-    return await decryptAppKey(stored);
+    const plain = await decryptAppKey(stored);
+    return parseStoredCreds(plain);
   } catch (e) {
     clearStoredAppKey();
-    return '';
+    return { username: '', password: '' };
   }
 }
 
-async function storeAppKey(appKey) {
-  if (!appKey) {
+async function storeAppKey(input) {
+  if (!input) {
     clearStoredAppKey();
     return;
   }
-  const encrypted = await encryptAppKey(appKey);
+  const creds = typeof input === 'string' ? { username: 'admin', password: input } : input;
+  const serialized = serializeCreds(creds);
+  if (!serialized) {
+    clearStoredAppKey();
+    return;
+  }
+  const encrypted = await encryptAppKey(serialized);
   localStorage.setItem(APP_KEY_STORAGE, encrypted || '');
 }
 
@@ -126,9 +155,13 @@ function clearStoredAppKey() {
   cachedApiKey = null;
 }
 
-async function requestApiKey(appKey) {
-  const headers = appKey ? { 'Authorization': `Bearer ${appKey}` } : {};
-  const res = await fetch('/api/v1/admin/login', { method: 'POST', headers });
+async function requestApiKey(creds) {
+  const body = serializeCreds(creds);
+  const res = await fetch('/api/v1/admin/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body
+  });
   if (!res.ok) {
     throw new Error('Unauthorized');
   }
@@ -139,13 +172,13 @@ async function requestApiKey(appKey) {
 }
 
 async function ensureApiKey() {
-  const appKey = await getStoredAppKey();
-  if (!appKey) {
+  const creds = await getStoredAppKey();
+  if (!creds || !creds.password) {
     window.location.href = '/admin';
     return null;
   }
   try {
-    return await requestApiKey(appKey);
+    return await requestApiKey(creds);
   } catch (e) {
     clearStoredAppKey();
     window.location.href = '/admin';

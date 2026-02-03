@@ -11,6 +11,13 @@ Grok2API rebuilt with **FastAPI**, fully aligned with the latest web call format
 
 <br>
 
+## Cloudflare Workers / Pages (Fork Enhancement)
+
+This fork additionally provides a **Cloudflare Workers / Pages** deployment (TypeScript, D1 + KV) for running Grok2API on Cloudflare:
+
+- Deployment guide: `README.cloudflare.md`
+- One-click GitHub Actions workflow: `.github/workflows/cloudflare-workers.yml`
+
 ## Usage
 
 ### How to start
@@ -26,7 +33,7 @@ uv run main.py
 - Deployment
 
 ```
-git clone https://github.com/chenyme/grok2api
+git clone https://github.com/TQZHR/grok2api.git
 
 docker compose up -d
 ```
@@ -34,7 +41,26 @@ docker compose up -d
 ### Admin panel
 
 URL: `http://<host>:8000/admin`  
-Default password: `grok2api` (config key `app.app_key`, change it in production).
+Default username/password: `admin` / `admin` (config keys `app.admin_username` / `app.app_key`, change it in production).
+
+Pages:
+- `http://<host>:8000/admin/token`: Token management (import/export/batch ops/auto register)
+- `http://<host>:8000/admin/datacenter`: Data center (metrics + log viewer)
+- `http://<host>:8000/admin/config`: Configuration (including auto register settings)
+- `http://<host>:8000/admin/cache`: Cache management (local cache + online assets)
+
+### Auto Register (Token -> Add -> Auto Register)
+
+Auto register will:
+- Start a local Turnstile Solver first (default 5 threads), then run registration
+- Stop the solver automatically when the job finishes
+- After a successful sign-up, it will automatically: accept TOS + enable NSFW
+  - If TOS/NSFW fails, the registration attempt is marked as failed and the UI will show the reason
+
+Required config keys (Admin -> Config, `register.*`):
+- `register.worker_domain` / `register.email_domain` / `register.admin_password`: temp-mail Worker settings
+- `register.solver_url` / `register.solver_browser_type` / `register.solver_threads`: local solver settings
+- Optional: `register.yescaptcha_key` (when set, YesCaptcha is preferred and local solver is not required)
 
 ### Environment variables
 
@@ -155,12 +181,14 @@ When upgrading from older versions, the service will keep existing local data an
 
 - Legacy config: if `data/setting.toml` exists, it will be merged into `data/config.toml` (only fills missing keys or keys still set to defaults).
 - Legacy cache dir: old `data/temp/{image,video}` will be migrated to `data/tmp/{image,video}` so unexpired caches are not lost.
+- Legacy accounts (best-effort, one-time): after upgrade, existing tokens will automatically run a TOS + NSFW enablement pass once (concurrency 10) to keep old accounts compatible.
 - Docker: make sure `./data:/app/data` (and `./logs:/app/logs`) are mounted persistently, otherwise container rebuilds will lose local data.
 
 | Module | Field | Key | Description | Default |
 | :--- | :--- | :--- | :--- | :--- |
 | **app** | `app_url` | App URL | External access URL for Grok2API (used for file links). | `http://127.0.0.1:8000` |
-| | `app_key` | Admin password | Password for the Grok2API admin panel. | `grok2api` |
+| | `admin_username` | Admin username | Username for the Grok2API admin panel. | `admin` |
+| | `app_key` | Admin password | Password for the Grok2API admin panel. | `admin` |
 | | `api_key` | API key | Bearer token required to call Grok2API. | `""` |
 | | `image_format` | Image format | Output image format (`url` or `base64`). | `url` |
 | | `video_format` | Video format | Output video format (url only). | `url` |
@@ -182,14 +210,28 @@ When upgrading from older versions, the service will keep existing local data an
 | | `reload_interval_sec` | Consistency refresh | Token state refresh interval in multi-worker setups (sec). | `30` |
 | **cache** | `enable_auto_clean` | Auto clean | Enable cache auto clean; cleanup when exceeding limit. | `true` |
 | | `limit_mb` | Cleanup threshold | Cache size threshold (MB) that triggers cleanup. | `1024` |
+| | `keep_base64_cache` | Keep base64 cache | Keep downloaded image/video cache files when returning Base64 (avoid “local cache = 0”). | `true` |
 | **performance** | `assets_max_concurrent` | Assets concurrency | Concurrency cap for assets upload/download/list. Recommended 25. | `25` |
 | | `media_max_concurrent` | Media concurrency | Concurrency cap for video/media generation. Recommended 50. | `50` |
 | | `usage_max_concurrent` | Usage concurrency | Concurrency cap for usage queries. Recommended 25. | `25` |
 | | `assets_delete_batch_size` | Asset cleanup batch | Batch concurrency for online asset deletion. Recommended 10. | `10` |
 | | `admin_assets_batch_size` | Admin cleanup batch | Batch concurrency for admin asset stats/cleanup. Recommended 10. | `10` |
+| **register** | `worker_domain` | Worker domain | Temp-mail Worker domain (without `https://`). | `""` |
+| | `email_domain` | Email domain | Temp-mail domain, e.g. `example.com`. | `""` |
+| | `admin_password` | Worker admin password | Admin password/key for the temp-mail Worker panel. | `""` |
+| | `yescaptcha_key` | YesCaptcha key | Optional. Prefer YesCaptcha when set. | `""` |
+| | `solver_url` | Solver URL | Local Turnstile solver URL. | `http://127.0.0.1:5072` |
+| | `solver_browser_type` | Solver browser | `chromium` / `chrome` / `msedge` / `camoufox`. | `camoufox` |
+| | `solver_threads` | Solver threads | Threads when auto-starting solver. | `5` |
+| | `register_threads` | Register concurrency | Registration concurrency. | `10` |
+| | `default_count` | Default count | Default register count if not specified in UI. | `100` |
+| | `auto_start_solver` | Auto start solver | Auto-start local solver when using localhost endpoint. | `true` |
+| | `solver_debug` | Solver debug | Enable solver debug logging. | `false` |
+| | `max_errors` | Max errors | Stop the job after this many failures (0 = auto). | `0` |
+| | `max_runtime_minutes` | Max runtime | Stop the job after N minutes (0 = unlimited). | `0` |
 
 <br>
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Chenyme/grok2api&type=Timeline)](https://star-history.com/#Chenyme/grok2api&Timeline)
+[![Star History Chart](https://api.star-history.com/svg?repos=TQZHR/grok2api&type=Timeline)](https://star-history.com/#TQZHR/grok2api&Timeline)

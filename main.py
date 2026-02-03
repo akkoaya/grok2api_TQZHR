@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
 
     # 0. 兼容迁移：保留旧版 data 目录中的配置/缓存等数据
-    from app.core.legacy_migration import migrate_legacy_cache_dirs
+    from app.core.legacy_migration import migrate_legacy_cache_dirs, migrate_legacy_account_settings
 
     await asyncio.to_thread(migrate_legacy_cache_dirs)
 
@@ -54,6 +54,15 @@ async def lifespan(app: FastAPI):
     from app.core.config import config
 
     await config.load()
+
+    # 1.1 Old account post-migration settings (TOS + NSFW), best-effort
+    async def _run_legacy_account_migration():
+        try:
+            await migrate_legacy_account_settings(concurrency=10)
+        except Exception as e:
+            logger.warning(f"Legacy account migration failed: {e}")
+
+    asyncio.create_task(_run_legacy_account_migration())
 
     # 2. 启动服务显示
     logger.info("Starting Grok2API...")
@@ -72,6 +81,14 @@ async def lifespan(app: FastAPI):
 
     # 关闭
     logger.info("Shutting down Grok2API...")
+
+    # Best-effort: stop auto-register to avoid blocking shutdown on background threads.
+    try:
+        from app.services.register import get_auto_register_manager
+
+        await get_auto_register_manager().stop_job()
+    except Exception:
+        pass
 
     from app.core.storage import StorageFactory
 
@@ -112,11 +129,47 @@ def create_app() -> FastAPI:
     app.include_router(files_router, prefix="/v1/files")
 
     # 静态文件服务
+    #
+    # NOTE: Starlette/StaticFiles serves JS as `application/javascript` without a charset.
+    # Some browsers/OS locales may then mis-decode UTF-8 and display `????` for Chinese text.
+    # Force `charset=utf-8` for JS to avoid mojibake across environments (local/docker).
     from fastapi.staticfiles import StaticFiles
 
     static_dir = Path(__file__).parent / "app" / "static"
     if static_dir.exists():
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+        class _UTF8StaticFiles(StaticFiles):
+            async def get_response(self, path: str, scope):  # type: ignore[override]
+                resp = await super().get_response(path, scope)
+
+                # Starlette uses `mimetypes` which may vary across OS/distros.
+                # Ensure UTF-8 decoding for text-like assets to avoid mojibake (`????`) on some locales.
+                ctype = (resp.headers.get("content-type", "") or "").strip()
+                ctype_l = ctype.lower()
+                if "charset=" in ctype_l:
+                    return resp
+
+                base = ctype.split(";", 1)[0].strip().lower()
+                is_text = base.startswith("text/")
+                is_js = base in ("application/javascript", "text/javascript")
+                is_json = base == "application/json"
+                is_css = base == "text/css"
+
+                # Some servers might respond with empty content-type for 304 etc; fall back by extension.
+                if not base:
+                    ext = Path(path).suffix.lower()
+                    if ext in (".js", ".mjs"):
+                        resp.headers["content-type"] = "application/javascript; charset=utf-8"
+                    elif ext == ".css":
+                        resp.headers["content-type"] = "text/css; charset=utf-8"
+                    elif ext in (".html", ".htm"):
+                        resp.headers["content-type"] = "text/html; charset=utf-8"
+                    return resp
+
+                if is_text or is_js or is_json or is_css:
+                    resp.headers["content-type"] = f"{base}; charset=utf-8"
+                return resp
+
+        app.mount("/static", _UTF8StaticFiles(directory=static_dir), name="static")
 
     # 注册管理路由
     from app.api.v1.admin import router as admin_router
@@ -154,4 +207,3 @@ if __name__ == "__main__":
         workers=workers,
         log_level=os.getenv("LOG_LEVEL", "INFO").lower(),
     )
-

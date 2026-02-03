@@ -14,6 +14,7 @@ from app.services.grok.chat import GrokChatService
 from app.services.grok.model import ModelService
 from app.services.grok.processor import ImageStreamProcessor, ImageCollectProcessor
 from app.services.token import get_token_manager
+from app.services.request_stats import request_stats
 from app.core.exceptions import ValidationException, AppException, ErrorType
 from app.core.logger import logger
 
@@ -124,6 +125,10 @@ async def create_image(request: ImageGenerationRequest):
         token = token_mgr.get_token(pool_name)
     except Exception as e:
         logger.error(f"Failed to get token: {e}")
+        try:
+            await request_stats.record_request(request.model or "image", success=False)
+        except Exception:
+            pass
         raise AppException(
             message="Internal service error obtaining token",
             error_type=ErrorType.SERVER.value,
@@ -131,6 +136,10 @@ async def create_image(request: ImageGenerationRequest):
         )
 
     if not token:
+        try:
+            await request_stats.record_request(request.model or "image", success=False)
+        except Exception:
+            pass
         raise AppException(
             message="No available tokens. Please try again later.",
             error_type=ErrorType.RATE_LIMIT.value,
@@ -144,18 +153,42 @@ async def create_image(request: ImageGenerationRequest):
     # 流式模式
     if request.stream:
         chat_service = GrokChatService()
-        response = await chat_service.chat(
-            token=token,
-            message=f"Image Generation:{request.prompt}",
-            model=model_info.grok_model,
-            mode=model_info.model_mode,
-            think=False,
-            stream=True
-        )
+        try:
+            response = await chat_service.chat(
+                token=token,
+                message=f"Image Generation:{request.prompt}",
+                model=model_info.grok_model,
+                mode=model_info.model_mode,
+                think=False,
+                stream=True
+            )
+        except Exception:
+            try:
+                await request_stats.record_request(model_info.model_id, success=False)
+            except Exception:
+                pass
+            raise
         
         processor = ImageStreamProcessor(model_info.model_id, token, n=request.n)
+
+        async def _wrapped_stream():
+            completed = False
+            try:
+                async for chunk in processor.process(response):
+                    yield chunk
+                completed = True
+            finally:
+                try:
+                    if completed:
+                        await token_mgr.sync_usage(token, model_info.model_id, consume_on_fail=True, is_usage=True)
+                        await request_stats.record_request(model_info.model_id, success=True)
+                    else:
+                        await request_stats.record_request(model_info.model_id, success=False)
+                except Exception:
+                    pass
+
         return StreamingResponse(
-            processor.process(response),
+            _wrapped_stream(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
         )
@@ -196,6 +229,14 @@ async def create_image(request: ImageGenerationRequest):
     # 构建响应
     import time
     data = [{"b64_json": img} for img in selected_images]
+
+    success = any(isinstance(img, str) and img and img != "error" for img in selected_images)
+    try:
+        if success:
+            await token_mgr.sync_usage(token, model_info.model_id, consume_on_fail=True, is_usage=True)
+        await request_stats.record_request(model_info.model_id, success=bool(success))
+    except Exception:
+        pass
     
     return JSONResponse(content={
         "created": int(time.time()),

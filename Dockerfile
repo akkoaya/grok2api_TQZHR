@@ -20,10 +20,19 @@ COPY pyproject.toml uv.lock /app/
 
 RUN uv sync --frozen --no-dev --no-install-project --active
 
+# Pre-install Playwright Chromium + OS deps to make auto-register/solver usable in Docker
+# without doing `apt-get` at runtime.
+RUN python -m playwright install --with-deps chromium
+
 COPY config.defaults.toml /app/config.defaults.toml
 COPY app /app/app
 COPY main.py /app/main.py
 COPY scripts /app/scripts
+
+# When building on Windows, shell scripts may be copied with CRLF endings and
+# without executable bit. Normalize both to keep ENTRYPOINT reliable.
+RUN sed -i 's/\r$//' /app/scripts/*.sh || true \
+    && chmod +x /app/scripts/*.sh || true
 
 RUN mkdir -p /app/data /app/data/tmp /app/logs
 

@@ -278,3 +278,31 @@
     .confirm-dialog .modal-content {
       padding: 0;
     }
+
+    .tab-header {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+
+    .tab-btn {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 9999px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--accents-6);
+      transition: all 0.15s;
+    }
+
+    .tab-btn.active {
+      background: #000;
+      color: #fff;
+      border-color: #000;
+    }
+
+    .tab-panel.hidden {
+      display: none;
+    }

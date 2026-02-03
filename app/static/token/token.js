@@ -1,4 +1,4 @@
-let apiKey = '';
+﻿let apiKey = '';
 let allTokens = {};
 let flatTokens = [];
 let isBatchProcessing = false;
@@ -8,12 +8,83 @@ let batchTotal = 0;
 let batchProcessed = 0;
 let currentBatchAction = null;
 const BATCH_SIZE = 50;
+let autoRegisterJobId = null;
+let autoRegisterTimer = null;
+let autoRegisterLastAdded = 0;
+let liveStatsTimer = null;
 
 async function init() {
   apiKey = await ensureApiKey();
   if (apiKey === null) return;
   setupConfirmDialog();
   loadData();
+  startLiveStats();
+}
+
+function startLiveStats() {
+  if (liveStatsTimer) clearInterval(liveStatsTimer);
+  // Keep stats fresh (use_count / quota changes) without disrupting table interactions.
+  liveStatsTimer = setInterval(() => {
+    refreshStatsOnly();
+  }, 5000);
+}
+
+async function refreshStatsOnly() {
+  try {
+    const res = await fetch('/api/v1/admin/tokens', {
+      headers: buildAuthHeaders(apiKey)
+    });
+    if (res.status === 401) {
+      logout();
+      return;
+    }
+    if (!res.ok) return;
+    const data = await res.json();
+
+    // Recalculate stats without re-rendering table.
+    let totalTokens = 0;
+    let activeTokens = 0;
+    let coolingTokens = 0;
+    let invalidTokens = 0;
+    let chatQuota = 0;
+    let totalCalls = 0;
+
+    Object.keys(data || {}).forEach(pool => {
+      const tokens = data[pool];
+      if (!Array.isArray(tokens)) return;
+      tokens.forEach(t => {
+        totalTokens += 1;
+        const status = (typeof t === 'string' ? 'active' : (t.status || 'active'));
+        const quota = Number(typeof t === 'string' ? 0 : (t.quota || 0)) || 0;
+        const useCount = Number(typeof t === 'string' ? 0 : (t.use_count || 0)) || 0;
+        totalCalls += useCount;
+        if (status === 'active') {
+          activeTokens += 1;
+          chatQuota += quota;
+        } else if (status === 'cooling') {
+          coolingTokens += 1;
+        } else {
+          invalidTokens += 1;
+        }
+      });
+    });
+
+    const imageQuota = Math.floor(chatQuota / 2);
+
+    const setText = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.innerText = text;
+    };
+    setText('stat-total', totalTokens.toLocaleString());
+    setText('stat-active', activeTokens.toLocaleString());
+    setText('stat-cooling', coolingTokens.toLocaleString());
+    setText('stat-invalid', invalidTokens.toLocaleString());
+    setText('stat-chat-quota', chatQuota.toLocaleString());
+    setText('stat-image-quota', imageQuota.toLocaleString());
+    setText('stat-total-calls', totalCalls.toLocaleString());
+  } catch (e) {
+    // Silent by design; do not spam toasts.
+  }
 }
 
 async function loadData() {
@@ -215,13 +286,13 @@ function updateSelectionState() {
 
 // Actions
 function addToken() {
-  openEditModal(-1);
+  openAddModal();
 }
 
 // Batch export (Selected only)
 function batchExport() {
   const selected = flatTokens.filter(t => t._selected);
-  if (selected.length === 0) return showToast("未选择 Token", 'error');
+  if (selected.length === 0) return showToast('未选择 Token', 'error');
   let content = "";
   selected.forEach(t => content += t.token + "\n");
   const blob = new Blob([content], { type: 'text/plain' });
@@ -234,6 +305,288 @@ function batchExport() {
   window.URL.revokeObjectURL(url);
   document.body.removeChild(a);
 }
+
+
+// Add Modal
+function openAddModal() {
+  const modal = document.getElementById('add-modal');
+  if (!modal) return;
+  switchAddTab('manual');
+  modal.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    modal.classList.add('is-open');
+  });
+}
+
+function closeAddModal() {
+  const modal = document.getElementById('add-modal');
+  if (!modal) return;
+  modal.classList.remove('is-open');
+  setTimeout(() => {
+    modal.classList.add('hidden');
+    resetAddModal();
+  }, 200);
+}
+
+function resetAddModal() {
+  const tokenInput = document.getElementById('add-token-input');
+  const noteInput = document.getElementById('add-token-note');
+  const quotaInput = document.getElementById('add-token-quota');
+  const countInput = document.getElementById('auto-register-count');
+  const concurrencyInput = document.getElementById('auto-register-concurrency');
+  const statusEl = document.getElementById('auto-register-status');
+  const autoBtn = document.getElementById('auto-register-btn');
+  if (tokenInput) tokenInput.value = '';
+  if (noteInput) noteInput.value = '';
+  if (quotaInput) quotaInput.value = 80;
+  if (countInput) countInput.value = '';
+  if (concurrencyInput) concurrencyInput.value = 10;
+  if (statusEl) {
+    statusEl.classList.add('hidden');
+    statusEl.textContent = '';
+  }
+  if (autoBtn) autoBtn.disabled = false;
+  stopAutoRegisterPolling();
+}
+
+function switchAddTab(tab) {
+  const manual = document.getElementById('add-tab-manual');
+  const auto = document.getElementById('add-tab-auto');
+  const btnManual = document.getElementById('tab-btn-manual');
+  const btnAuto = document.getElementById('tab-btn-auto');
+  if (!manual || !auto || !btnManual || !btnAuto) return;
+
+  if (tab === 'auto') {
+    manual.classList.add('hidden');
+    auto.classList.remove('hidden');
+    btnManual.classList.remove('active');
+    btnAuto.classList.add('active');
+  } else {
+    auto.classList.add('hidden');
+    manual.classList.remove('hidden');
+    btnAuto.classList.remove('active');
+    btnManual.classList.add('active');
+  }
+}
+
+async function submitManualAdd() {
+  const tokenInput = document.getElementById('add-token-input');
+  const poolSelect = document.getElementById('add-token-pool');
+  const quotaInput = document.getElementById('add-token-quota');
+  const noteInput = document.getElementById('add-token-note');
+
+  if (!tokenInput) return;
+  let token = tokenInput.value.trim();
+  if (!token) return showToast('Token 不能为空', 'error');
+  if (token.startsWith('sso=')) token = token.slice(4);
+
+  if (flatTokens.some(t => t.token === token)) {
+    return showToast('Token 已存在', 'error');
+  }
+
+  const pool = poolSelect ? (poolSelect.value.trim() || 'ssoBasic') : 'ssoBasic';
+  let quota = quotaInput ? parseInt(quotaInput.value, 10) : 80;
+  if (!quota || Number.isNaN(quota)) quota = 80;
+  const note = noteInput ? noteInput.value.trim().slice(0, 50) : '';
+
+  flatTokens.push({
+    token: token,
+    pool: pool,
+    quota: quota,
+    note: note,
+    status: 'active',
+    use_count: 0,
+    _selected: false
+  });
+
+  await syncToServer();
+  closeAddModal();
+  loadData();
+}
+
+function stopAutoRegisterPolling() {
+  if (autoRegisterTimer) {
+    clearInterval(autoRegisterTimer);
+    autoRegisterTimer = null;
+  }
+  autoRegisterJobId = null;
+  autoRegisterLastAdded = 0;
+
+  const stopBtn = document.getElementById('auto-register-stop-btn');
+  if (stopBtn) {
+    stopBtn.classList.add('hidden');
+    stopBtn.disabled = false;
+  }
+}
+
+function updateAutoRegisterStatus(text) {
+  const statusEl = document.getElementById('auto-register-status');
+  if (!statusEl) return;
+  statusEl.textContent = text;
+  statusEl.classList.remove('hidden');
+}
+
+async function startAutoRegister() {
+  const btn = document.getElementById('auto-register-btn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const countEl = document.getElementById('auto-register-count');
+    const concurrencyEl = document.getElementById('auto-register-concurrency');
+
+    const pool = 'ssoBasic';
+    let countVal = countEl ? parseInt(countEl.value, 10) : NaN;
+    if (!countVal || Number.isNaN(countVal) || countVal <= 0) countVal = null;
+
+    let concurrencyVal = concurrencyEl ? parseInt(concurrencyEl.value, 10) : NaN;
+    if (!concurrencyVal || Number.isNaN(concurrencyVal) || concurrencyVal <= 0) concurrencyVal = null;
+
+    const res = await fetch('/api/v1/admin/tokens/auto-register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildAuthHeaders(apiKey)
+      },
+      body: JSON.stringify({ count: countVal, pool: pool, concurrency: concurrencyVal })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || '启动失败', 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    const data = await res.json();
+    autoRegisterJobId = data.job?.job_id || null;
+    autoRegisterLastAdded = 0;
+    updateAutoRegisterStatus('正在启动注册...');
+
+    const stopBtn = document.getElementById('auto-register-stop-btn');
+    if (stopBtn) {
+      stopBtn.classList.remove('hidden');
+      stopBtn.disabled = false;
+    }
+
+    autoRegisterTimer = setInterval(pollAutoRegisterStatus, 2000);
+    pollAutoRegisterStatus();
+  } catch (e) {
+    showToast('启动失败: ' + e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function stopAutoRegister() {
+  const stopBtn = document.getElementById('auto-register-stop-btn');
+  if (stopBtn) stopBtn.disabled = true;
+
+  try {
+    if (!autoRegisterJobId) {
+      updateAutoRegisterStatus('当前没有进行中的注册任务');
+      return;
+    }
+
+    const res = await fetch(`/api/v1/admin/tokens/auto-register/stop?job_id=${autoRegisterJobId}`, {
+      method: 'POST',
+      headers: buildAuthHeaders(apiKey)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || '停止失败', 'error');
+      return;
+    }
+
+    updateAutoRegisterStatus('正在停止...');
+  } catch (e) {
+    showToast('停止失败: ' + e.message, 'error');
+  } finally {
+    if (stopBtn) stopBtn.disabled = false;
+  }
+}
+
+async function pollAutoRegisterStatus() {
+  if (!autoRegisterJobId) return;
+  try {
+    const res = await fetch(`/api/v1/admin/tokens/auto-register/status?job_id=${autoRegisterJobId}`, {
+      headers: buildAuthHeaders(apiKey)
+    });
+    if (!res.ok) {
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      if (res.status === 404) {
+        updateAutoRegisterStatus('注册任务不存在（可能已结束或服务已重启）');
+        stopAutoRegisterPolling();
+        const btn = document.getElementById('auto-register-btn');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      return;
+    }
+
+    const data = await res.json();
+    const status = data.status;
+    if (status === 'idle' || status === 'not_found') {
+      updateAutoRegisterStatus('注册任务已结束');
+      stopAutoRegisterPolling();
+      const btn = document.getElementById('auto-register-btn');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    if (status === 'running' || status === 'starting' || status === 'stopping') {
+      const stopBtn = document.getElementById('auto-register-stop-btn');
+      if (stopBtn) stopBtn.classList.remove('hidden');
+
+      const completed = data.completed || 0;
+      const total = data.total || 0;
+      const added = data.added || 0;
+      const errors = data.errors || 0;
+
+      if (added > autoRegisterLastAdded) {
+        autoRegisterLastAdded = added;
+        loadData(); // 实时刷新 token 列表
+      }
+
+      let msg = `注册中 ${completed}/${total}（已添加 ${added}，失败 ${errors}）`;
+      if (status === 'stopping') msg = `正在停止...（已添加 ${added}，失败 ${errors}）`;
+      if (data.last_error) msg += `，最近错误：${data.last_error}`;
+      updateAutoRegisterStatus(msg);
+      return;
+    }
+
+    if (status === 'completed') {
+      updateAutoRegisterStatus(`注册完成，新增 ${data.added || 0} 个`);
+      showToast('注册完成', 'success');
+      stopAutoRegisterPolling();
+      const btn = document.getElementById('auto-register-btn');
+      if (btn) btn.disabled = false;
+      loadData();
+      return;
+    }
+
+    if (status === 'stopped') {
+      updateAutoRegisterStatus(`注册已停止（已添加 ${data.added || 0}，失败 ${data.errors || 0}）`);
+      stopAutoRegisterPolling();
+      const btn = document.getElementById('auto-register-btn');
+      if (btn) btn.disabled = false;
+      loadData();
+      return;
+    }
+
+    if (status === 'error') {
+      updateAutoRegisterStatus(`注册失败：${data.error || data.last_error || '未知错误'}`);
+      showToast('注册失败', 'error');
+      stopAutoRegisterPolling();
+      const btn = document.getElementById('auto-register-btn');
+      if (btn) btn.disabled = false;
+    }
+  } catch (e) {
+    // ignore transient errors
+  }
+}
+
 
 
 // Modal Logic
@@ -425,7 +778,7 @@ async function submitImport() {
 function exportTokens() {
   let content = "";
   flatTokens.forEach(t => content += t.token + "\n");
-  if (!content) return showToast("列表为空", 'error');
+  if (!content) return showToast('列表为空', 'error');
 
   const blob = new Blob([content], { type: 'text/plain' });
   const url = window.URL.createObjectURL(blob);
@@ -499,7 +852,7 @@ async function startBatchRefresh() {
   }
 
   const selected = flatTokens.filter(t => t._selected);
-  if (selected.length === 0) return showToast("未选择 Token", 'error');
+  if (selected.length === 0) return showToast('未选择 Token', 'error');
 
   // Init state
   isBatchProcessing = true;
@@ -636,7 +989,7 @@ async function startBatchDelete() {
     return;
   }
   const selected = flatTokens.filter(t => t._selected);
-  if (selected.length === 0) return showToast("未选择 Token", 'error');
+  if (selected.length === 0) return showToast('未选择 Token', 'error');
   const ok = await confirmAction(`确定要删除选中的 ${selected.length} 个 Token 吗？`, { okText: '删除' });
   if (!ok) return;
 

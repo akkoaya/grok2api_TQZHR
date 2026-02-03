@@ -2,6 +2,7 @@
 Grok Chat 服务
 """
 
+import asyncio
 import uuid
 import orjson
 from typing import Dict, List, Any
@@ -23,6 +24,7 @@ from app.services.grok.assets import UploadService
 from app.services.grok.processor import StreamProcessor, CollectProcessor
 from app.services.grok.retry import retry_on_status
 from app.services.token import get_token_manager
+from app.services.request_stats import request_stats
 
 
 CHAT_API = "https://grok.com/rest/app-chat/conversations/new"
@@ -462,6 +464,10 @@ class ChatService:
             token = token_mgr.get_token(pool_name)
         except Exception as e:
             logger.error(f"Failed to get token: {e}")
+            try:
+                await request_stats.record_request(model, success=False)
+            except Exception:
+                pass
             raise AppException(
                 message="Internal service error obtaining token",
                 error_type=ErrorType.SERVER.value,
@@ -469,6 +475,10 @@ class ChatService:
             )
 
         if not token:
+            try:
+                await request_stats.record_request(model, success=False)
+            except Exception:
+                pass
             raise AppException(
                 message="No available tokens. Please try again later.",
                 error_type=ErrorType.RATE_LIMIT.value,
@@ -498,9 +508,17 @@ class ChatService:
         try:
             response, _, model_name = await service.chat_openai(token, chat_request)
         except AppException:
+            try:
+                await request_stats.record_request(model, success=False)
+            except Exception:
+                pass
             raise
         except Exception as e:
             logger.error(f"Chat service error: {e}")
+            try:
+                await request_stats.record_request(model, success=False)
+            except Exception:
+                pass
             raise UpstreamException(
                 message=f"Service processing failed: {str(e)}",
                 details={"error": str(e)}
@@ -508,9 +526,34 @@ class ChatService:
         
         # 处理响应
         if is_stream:
-            return StreamProcessor(model_name, token, think).process(response)
-        else:
-            return await CollectProcessor(model_name, token).process(response)
+            processor = StreamProcessor(model_name, token, think).process(response)
+
+            async def _wrapped_stream():
+                completed = False
+                try:
+                    async for chunk in processor:
+                        yield chunk
+                    completed = True
+                finally:
+                    # Only count as "success" when the stream ends naturally.
+                    try:
+                        if completed:
+                            await token_mgr.sync_usage(token, model_name, consume_on_fail=True, is_usage=True)
+                            await request_stats.record_request(model_name, success=True)
+                        else:
+                            await request_stats.record_request(model_name, success=False)
+                    except Exception:
+                        pass
+
+            return _wrapped_stream()
+
+        result = await CollectProcessor(model_name, token).process(response)
+        try:
+            await token_mgr.sync_usage(token, model_name, consume_on_fail=True, is_usage=True)
+            await request_stats.record_request(model_name, success=True)
+        except Exception:
+            pass
+        return result
 
 
 __all__ = [

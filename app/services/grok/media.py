@@ -16,6 +16,7 @@ from app.services.grok.statsig import StatsigService
 from app.services.grok.model import ModelService
 from app.services.token import get_token_manager
 from app.services.grok.processor import VideoStreamProcessor, VideoCollectProcessor
+from app.services.request_stats import request_stats
 
 # API 端点
 CREATE_POST_API = "https://grok.com/rest/media/post/create"
@@ -401,6 +402,10 @@ class VideoService:
             token = token_mgr.get_token(pool_name)
         except Exception as e:
             logger.error(f"Failed to get token: {e}")
+            try:
+                await request_stats.record_request(model, success=False)
+            except Exception:
+                pass
             raise AppException(
                 message="Internal service error obtaining token",
                 error_type=ErrorType.SERVER.value,
@@ -408,6 +413,10 @@ class VideoService:
             )
         
         if not token:
+            try:
+                await request_stats.record_request(model, success=False)
+            except Exception:
+                pass
             raise AppException(
                 message="No available tokens. Please try again later.",
                 error_type=ErrorType.RATE_LIMIT.value,
@@ -451,23 +460,54 @@ class VideoService:
         # 生成视频
         service = VideoService()
         
-        # 图片转视频
-        if image_url:
-            response = await service.generate_from_image(
-                token, prompt, image_url, 
-                aspect_ratio, video_length, resolution, stream, preset
-            )
-        else:
-            response = await service.generate(
-                token, prompt, 
-                aspect_ratio, video_length, resolution, stream, preset
-            )
+        try:
+            # 图片转视频
+            if image_url:
+                response = await service.generate_from_image(
+                    token, prompt, image_url,
+                    aspect_ratio, video_length, resolution, stream, preset
+                )
+            else:
+                response = await service.generate(
+                    token, prompt,
+                    aspect_ratio, video_length, resolution, stream, preset
+                )
+        except Exception:
+            try:
+                await request_stats.record_request(model, success=False)
+            except Exception:
+                pass
+            raise
         
         # 处理响应
         if is_stream:
-            return VideoStreamProcessor(model, token, think).process(response)
-        else:
-            return await VideoCollectProcessor(model, token).process(response)
+            processor = VideoStreamProcessor(model, token, think).process(response)
+
+            async def _wrapped_stream():
+                completed = False
+                try:
+                    async for chunk in processor:
+                        yield chunk
+                    completed = True
+                finally:
+                    try:
+                        if completed:
+                            await token_mgr.sync_usage(token, model, consume_on_fail=True, is_usage=True)
+                            await request_stats.record_request(model, success=True)
+                        else:
+                            await request_stats.record_request(model, success=False)
+                    except Exception:
+                        pass
+
+            return _wrapped_stream()
+
+        result = await VideoCollectProcessor(model, token).process(response)
+        try:
+            await token_mgr.sync_usage(token, model, consume_on_fail=True, is_usage=True)
+            await request_stats.record_request(model, success=True)
+        except Exception:
+            pass
+        return result
 
 
 __all__ = ["VideoService"]

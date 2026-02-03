@@ -33,15 +33,43 @@ uv run main.py
 - 项目部署
 
 ```
-git clone https://github.com/chenyme/grok2api
+git clone https://github.com/TQZHR/grok2api.git
 
 docker compose up -d
 ```
 
 ### 管理面板
 
-访问地址：`http://<host>:8000/admin`  
-默认登录密码：`grok2api`（对应配置项 `app.app_key`，建议修改）。
+访问地址：`http://<host>:8000/admin`
+
+默认账号密码：`admin` / `admin`（对应配置项 `app.admin_username` / `app.app_key`，建议上线后修改）。
+
+常用页面：
+- `http://<host>:8000/admin/token`：Token 管理（导入/导出/批量操作/自动注册）
+- `http://<host>:8000/admin/datacenter`：数据中心（常用指标 + 日志查看）
+- `http://<host>:8000/admin/config`：配置管理（含自动注册所需配置）
+- `http://<host>:8000/admin/cache`：缓存管理（本地缓存 + 在线资产）
+
+### 自动注册（Token 管理 -> 添加 -> 自动注册）
+
+支持两种方式：
+- 直接添加 Token（手动/批量导入）
+- 自动注册并自动写入 Token 池
+
+自动注册特性：
+- 可设置注册数量（不填默认 `100`）
+- 可设置并发（默认 `10`）
+- 注册前会自动启动本地 Turnstile Solver（默认 5 线程），注册结束后自动关闭
+- 注册成功后会自动执行：同意用户协议（TOS）+ 开启 NSFW
+  - 若协议未成功同意或 NSFW 未成功开启，会判定该次注册失败并在前端显示错误原因
+
+自动注册前置配置（在「配置管理」-> `register.*`）：
+- `register.worker_domain` / `register.email_domain` / `register.admin_password`：临时邮箱 Worker 配置
+- `register.solver_url` / `register.solver_browser_type` / `register.solver_threads`：本地 Turnstile Solver 配置
+- 可选：`register.yescaptcha_key`（配置后优先走 YesCaptcha，无需本地 solver）
+
+升级兼容：
+- 本地部署升级后会自动对「旧 Token」做一次 TOS + NSFW（并发 10，best-effort，仅执行一次，避免重复刷）。
 
 ### 环境变量
 
@@ -55,6 +83,16 @@ docker compose up -d
 | `SERVER_WORKERS`      | Uvicorn worker 数量                                 | `1`       | `2`                                               |
 | `SERVER_STORAGE_TYPE` | 存储类型（`local`/`redis`/`mysql`/`pgsql`） | `local`   | `pgsql`                                           |
 | `SERVER_STORAGE_URL`  | 存储连接串（local 时可为空）                        | `""`      | `postgresql+asyncpg://user:password@host:5432/db` |
+
+### 配置文件与升级迁移
+
+- 配置文件：`data/config.toml`（首次启动会基于 `config.defaults.toml` 自动生成；管理面板也可直接修改）
+- Token 数据：`data/token.json`
+- 升级时自动兼容迁移（本地/Docker）：
+  - 旧版配置：检测到 `data/setting.toml` 时，会按“缺失字段/仍为默认值”的策略合并到新配置
+  - 旧版缓存目录：`data/temp/{image,video}` -> `data/tmp/{image,video}`
+  - 旧账号一次性修复（best-effort）：升级后会对现有 Token 自动执行一次「同意用户协议 + 开启 NSFW」（并发 10）
+
 
 ### 可用次数
 
@@ -171,7 +209,8 @@ curl http://localhost:8000/v1/images/generations \
 | 模块                  | 字段                         | 配置名       | 说明                                                 | 默认值                                                    |
 | :-------------------- | :--------------------------- | :----------- | :--------------------------------------------------- | :-------------------------------------------------------- |
 | **app**         | `app_url`                  | 应用地址     | 当前 Grok2API 服务的外部访问 URL，用于文件链接访问。 | `http://127.0.0.1:8000`                                 |
-|                       | `app_key`                  | 后台密码     | 登录 Grok2API 服务管理后台的密码，请妥善保管。       | `grok2api`                                              |
+|                       | `admin_username`           | 后台账号     | 登录 Grok2API 服务管理后台的用户名。                 | `admin`                                                 |
+|                       | `app_key`                  | 后台密码     | 登录 Grok2API 服务管理后台的密码，请妥善保管。       | `admin`                                                 |
 |                       | `api_key`                  | API 密钥     | 调用 Grok2API 服务所需的 Bearer Token，请妥善保管。  | `""`                                                    |
 |                       | `image_format`             | 图片格式     | 生成的图片格式（url 或 base64）。                    | `url`                                                   |
 |                       | `video_format`             | 视频格式     | 生成的视频格式（仅支持 url）。                       | `url`                                                   |
@@ -203,4 +242,4 @@ curl http://localhost:8000/v1/images/generations \
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Chenyme/grok2api&type=Timeline)](https://star-history.com/#Chenyme/grok2api&Timeline)
+[![Star History Chart](https://api.star-history.com/svg?repos=TQZHR/grok2api&type=Timeline)](https://star-history.com/#TQZHR/grok2api&Timeline)

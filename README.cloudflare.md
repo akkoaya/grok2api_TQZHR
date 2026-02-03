@@ -17,6 +17,7 @@
 - Workers 代码更新不会清空 D1 / KV：只要继续绑定同一个 D1 数据库和 KV Namespace，账户数据（Tokens / Keys / 配置 / 日志）不会丢。
 - 缓存不会因为升级而立刻丢失：KV 中的缓存对象会按“本地 0 点”过期（expiration）并由 Cron 每天清理元数据，升级后仍保持一天一清理。
 - 注意不要随意改 `wrangler.toml` 里的 `name` / D1/KV 绑定 ID；如果你用 GitHub Actions 一键部署，也请保持 Worker 名称一致，否则可能创建新的 D1/KV 资源导致“看起来像丢数据”。
+- 管理员账号密码不会被默认值覆盖：迁移脚本使用 `INSERT OR IGNORE` 初始化默认配置；如果你之前已在面板里修改过账号/密码，升级后会保留原值。
 
 ## 0) 前置条件
 
@@ -56,6 +57,12 @@ npx wrangler d1 create grok2api
 
 ```bash
 npx wrangler d1 migrations apply grok2api --remote
+```
+
+你也可以直接按绑定名执行（推荐，避免改名后出错）：
+
+```bash
+npx wrangler d1 migrations apply DB --remote
 ```
 
 迁移文件在：
@@ -123,7 +130,7 @@ npx wrangler deploy
 
 1. `npm ci` + `npm run typecheck`
 2. 自动创建/复用 D1 + KV，并生成 `wrangler.ci.toml`
-3. `wrangler d1 migrations apply grok2api --remote`
+3. `wrangler d1 migrations apply DB --remote --config wrangler.ci.toml`
 4. `wrangler deploy`
 
 你需要在 GitHub 仓库里配置 Secrets（Settings → Secrets and variables → Actions）：

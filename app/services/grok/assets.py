@@ -573,6 +573,13 @@ class DownloadService(BaseService):
         """
         async with _get_assets_semaphore():
             try:
+                # Be forgiving: callers may pass absolute URLs.
+                if isinstance(file_path, str) and file_path.startswith("http"):
+                    try:
+                        file_path = urlparse(file_path).path
+                    except Exception:
+                        pass
+
                 cache_path = self._cache_path(file_path, media_type)
                 
                 # 如果已缓存
@@ -677,8 +684,10 @@ class DownloadService(BaseService):
             # 使用基础服务的工具方法转换
             data_uri = self.to_b64(cache_path, mime_type)
             
-            # 删除临时文件
-            if data_uri:
+            # 默认保留文件到本地缓存，便于后台“缓存管理”统计与复用；
+            # 如需转为临时模式，可通过 cache.keep_base64_cache=false 关闭保留。
+            keep_cache = get_config("cache.keep_base64_cache", True)
+            if data_uri and not keep_cache:
                 try:
                     cache_path.unlink()
                 except Exception as e:
@@ -698,9 +707,8 @@ class DownloadService(BaseService):
         if not cache_dir.exists():
             return {"count": 0, "size_mb": 0.0}
         
+        # 统计目录下所有文件（有些资产路径可能不带标准后缀名）
         files = [f for f in cache_dir.glob("*") if f.is_file()]
-        allowed_exts = IMAGE_EXTS if media_type == "image" else VIDEO_EXTS
-        files = [f for f in files if f.suffix.lower() in allowed_exts]
         total_size = sum(f.stat().st_size for f in files)
         
         return {
@@ -715,8 +723,6 @@ class DownloadService(BaseService):
             return {"total": 0, "page": page, "page_size": page_size, "items": []}
 
         files = [f for f in cache_dir.glob("*") if f.is_file()]
-        allowed_exts = IMAGE_EXTS if media_type == "image" else VIDEO_EXTS
-        files = [f for f in files if f.suffix.lower() in allowed_exts]
         items = []
         for f in files:
             try:
