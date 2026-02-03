@@ -28,7 +28,9 @@ class_name = "AutoRegisterJob"
 
 [[migrations]]
 tag = "do-v1"
-new_classes = ["AutoRegisterJob"]
+# NOTE: Cloudflare Free plan requires Durable Objects namespaces to be created
+# via `new_sqlite_classes` migrations (error 10097).
+new_sqlite_classes = ["AutoRegisterJob"]
 
 [vars]
 # Daily reset at local midnight (default: Asia/Shanghai, UTC+8).
