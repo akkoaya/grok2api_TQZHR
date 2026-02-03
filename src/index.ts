@@ -57,8 +57,10 @@ async function fetchAsset(c: any, pathname: string): Promise<Response> {
     const res = await assets.fetch(new Request(url.toString(), c.req.raw));
     const extra: Record<string, string> = { "x-grok2api-build": buildSha };
 
-    // Avoid caching HTML aggressively, otherwise users may keep seeing the old panel after redeploy.
-    if (pathname.toLowerCase().endsWith(".html")) {
+    // Avoid caching UI files aggressively, otherwise users may keep seeing old UI after redeploy.
+    // We keep images/videos cacheable (handled by KV + cache proxy paths), but HTML/JS/CSS should refresh quickly.
+    const lower = pathname.toLowerCase();
+    if (lower.endsWith(".html") || lower.endsWith(".js") || lower.endsWith(".css")) {
       extra["cache-control"] = "no-store, no-cache, must-revalidate";
       extra["pragma"] = "no-cache";
       extra["expires"] = "0";
