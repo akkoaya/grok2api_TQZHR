@@ -12,6 +12,53 @@ let autoRegisterJobId = null;
 let autoRegisterTimer = null;
 let autoRegisterLastAdded = 0;
 let liveStatsTimer = null;
+let isWorkersRuntime = false;
+
+function setAutoRegisterUiEnabled(enabled) {
+  const btnAuto = document.getElementById('tab-btn-auto');
+  const tabAuto = document.getElementById('add-tab-auto');
+  if (btnAuto) btnAuto.style.display = enabled ? '' : 'none';
+  if (tabAuto) tabAuto.style.display = enabled ? '' : 'none';
+  if (!enabled) {
+    try {
+      switchAddTab('manual');
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+async function detectWorkersRuntime() {
+  try {
+    const res = await fetch('/health', { cache: 'no-store' });
+    if (!res.ok) return false;
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      const runtime = (data && data.runtime) ? String(data.runtime) : '';
+      return runtime.toLowerCase() === 'cloudflare-workers';
+    } catch (e) {
+      return /cloudflare-workers/i.test(text);
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+async function applyRuntimeUiFlags() {
+  // Default hide first; show back for local/docker after detection.
+  setAutoRegisterUiEnabled(false);
+  isWorkersRuntime = await detectWorkersRuntime();
+  if (!isWorkersRuntime) {
+    setAutoRegisterUiEnabled(true);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', applyRuntimeUiFlags);
+} else {
+  applyRuntimeUiFlags();
+}
 
 async function init() {
   apiKey = await ensureApiKey();

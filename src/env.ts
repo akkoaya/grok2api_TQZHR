@@ -2,7 +2,6 @@ export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
   KV_CACHE: KVNamespace;
-  AUTO_REGISTER: DurableObjectNamespace;
 
   // Optional vars via wrangler.toml [vars]
   // Cache reset time zone offset minutes (default Asia/Shanghai = 480)

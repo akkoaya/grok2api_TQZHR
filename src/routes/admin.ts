@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { requireAdminAuth } from "../auth";
 import { getSettings, saveSettings, normalizeCfCookie } from "../settings";
-import { ensureTosAndNsfw } from "../grok/accountSettings";
 import {
   addApiKey,
   batchAddApiKeys,
@@ -40,89 +39,6 @@ import { nowMs } from "../utils/time";
 
 function jsonError(message: string, code: string): Record<string, unknown> {
   return { error: message, code };
-}
-
-const LEGACY_TOS_NSFW_KEY = "legacy_accounts_tos_nsfw_v1";
-
-async function runTosNsfwFixForTokens(env: Env, rawTokens: string[], concurrency: number): Promise<{ ok: number; failed: number }> {
-  const tokens = Array.from(
-    new Set(
-      rawTokens
-        .map((t) => String(t ?? "").trim())
-        .filter(Boolean)
-        .map((t) => (t.startsWith("sso=") ? t.slice(4).trim() : t)),
-    ),
-  );
-  if (!tokens.length) return { ok: 0, failed: 0 };
-
-  const settings = await getSettings(env);
-  const cf = String(settings.grok.cf_clearance ?? "").trim();
-  const limit = Math.max(1, Math.min(10, Math.floor(concurrency || 10)));
-
-  let ok = 0;
-  let failed = 0;
-  let i = 0;
-
-  const worker = async () => {
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const idx = i++;
-      if (idx >= tokens.length) return;
-      const token = tokens[idx]!;
-      const res = await ensureTosAndNsfw({ token, cf_clearance: cf });
-      if (res.ok) ok += 1;
-      else {
-        failed += 1;
-        console.warn(`[legacy-fix] token=${token.slice(0, 8)}… failed: ${res.error || "unknown"}`);
-      }
-      // Be nice to the upstream endpoints.
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  };
-
-  await Promise.all(Array.from({ length: limit }, () => worker()));
-  return { ok, failed };
-}
-
-async function maybeStartLegacyTosNsfwFix(env: Env, ctx: ExecutionContext): Promise<void> {
-  const now = nowMs();
-  const row = await dbFirst<{ value: string; updated_at: number }>(env.DB, "SELECT value, updated_at FROM settings WHERE key = ?", [
-    LEGACY_TOS_NSFW_KEY,
-  ]);
-  if (row?.value?.startsWith("done:")) return;
-
-  const staleAfterMs = 60 * 60 * 1000;
-  if (row?.value === "running" && now - (row.updated_at ?? 0) < staleAfterMs) return;
-
-  if (!row) {
-    const res = await env.DB.prepare("INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)")
-      .bind(LEGACY_TOS_NSFW_KEY, "running", now)
-      .run();
-    if ((res.meta?.changes ?? 0) === 0) return;
-  } else {
-    const res = await env.DB.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND updated_at = ?")
-      .bind("running", now, LEGACY_TOS_NSFW_KEY, row.updated_at)
-      .run();
-    if ((res.meta?.changes ?? 0) === 0) return;
-  }
-
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const tokens = (await listTokens(env.DB)).map((t) => t.token);
-        const result = await runTosNsfwFixForTokens(env, tokens, 10);
-        const doneValue = `done:${result.ok}/${tokens.length} failed:${result.failed}`;
-        await env.DB.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ?")
-          .bind(doneValue, nowMs(), LEGACY_TOS_NSFW_KEY)
-          .run();
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        await env.DB.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ?")
-          .bind(`error:${msg.slice(0, 180)}`, nowMs(), LEGACY_TOS_NSFW_KEY)
-          .run();
-      }
-    })(),
-  );
 }
 
 function parseBearer(auth: string | null): string | null {
@@ -292,21 +208,6 @@ adminRoutes.get("/api/v1/admin/config", requireAdminAuth, async (c) => {
         assets_delete_batch_size: Number(settings.performance.assets_delete_batch_size ?? 10),
         admin_assets_batch_size: Number(settings.performance.admin_assets_batch_size ?? 10),
       },
-      register: {
-        worker_domain: String(settings.register.worker_domain ?? ""),
-        email_domain: String(settings.register.email_domain ?? ""),
-        admin_password: String(settings.register.admin_password ?? ""),
-        yescaptcha_key: String(settings.register.yescaptcha_key ?? ""),
-        solver_url: String(settings.register.solver_url ?? ""),
-        solver_browser_type: String(settings.register.solver_browser_type ?? "camoufox"),
-        solver_threads: Number(settings.register.solver_threads ?? 5),
-        register_threads: Number(settings.register.register_threads ?? 10),
-        default_count: Number(settings.register.default_count ?? 100),
-        auto_start_solver: Boolean(settings.register.auto_start_solver),
-        solver_debug: Boolean(settings.register.solver_debug),
-        max_errors: Number(settings.register.max_errors ?? 0),
-        max_runtime_minutes: Number(settings.register.max_runtime_minutes ?? 0),
-      },
     });
   } catch (e) {
     return c.json(legacyErr(`Get config failed: ${e instanceof Error ? e.message : String(e)}`), 500);
@@ -321,14 +222,12 @@ adminRoutes.post("/api/v1/admin/config", requireAdminAuth, async (c) => {
     const tokenCfg = (body && typeof body === "object" ? body.token : null) as any;
     const cacheCfg = (body && typeof body === "object" ? body.cache : null) as any;
     const performanceCfg = (body && typeof body === "object" ? body.performance : null) as any;
-    const registerCfg = (body && typeof body === "object" ? body.register : null) as any;
 
     const global_config: any = {};
     const grok_config: any = {};
     const token_config: any = {};
     const cache_config: any = {};
     const performance_config: any = {};
-    const register_config: any = {};
 
     if (appCfg && typeof appCfg === "object") {
       if (typeof appCfg.api_key === "string") grok_config.api_key = appCfg.api_key.trim();
@@ -386,21 +285,7 @@ adminRoutes.post("/api/v1/admin/config", requireAdminAuth, async (c) => {
       }
     }
 
-    if (registerCfg && typeof registerCfg === "object") {
-      const strFields = ["worker_domain", "email_domain", "admin_password", "yescaptcha_key", "solver_url", "solver_browser_type"] as const;
-      for (const f of strFields) if (typeof registerCfg[f] === "string") register_config[f] = registerCfg[f].trim();
-
-      const numFields = ["solver_threads", "register_threads", "default_count", "max_errors", "max_runtime_minutes"] as const;
-      for (const f of numFields) {
-        if (!Number.isFinite(Number(registerCfg[f]))) continue;
-        register_config[f] = Math.max(0, Math.floor(Number(registerCfg[f])));
-      }
-
-      if (typeof registerCfg.auto_start_solver === "boolean") register_config.auto_start_solver = registerCfg.auto_start_solver;
-      if (typeof registerCfg.solver_debug === "boolean") register_config.solver_debug = registerCfg.solver_debug;
-    }
-
-    await saveSettings(c.env, { global_config, grok_config, token_config, cache_config, performance_config, register_config });
+    await saveSettings(c.env, { global_config, grok_config, token_config, cache_config, performance_config });
     return c.json(legacyOk({ message: "配置已更新" }));
   } catch (e) {
     return c.json(legacyErr(`Update config failed: ${e instanceof Error ? e.message : String(e)}`), 500);
@@ -409,7 +294,6 @@ adminRoutes.post("/api/v1/admin/config", requireAdminAuth, async (c) => {
 
 adminRoutes.get("/api/v1/admin/tokens", requireAdminAuth, async (c) => {
   try {
-    if (c.executionCtx) await maybeStartLegacyTosNsfwFix(c.env, c.executionCtx);
     const rows = await listTokens(c.env.DB);
     const now = nowMs();
 
@@ -496,9 +380,6 @@ adminRoutes.post("/api/v1/admin/tokens", requireAdminAuth, async (c) => {
     }
 
     if (stmts.length) await c.env.DB.batch(stmts);
-    if (newlyAdded.length && c.executionCtx) {
-      c.executionCtx.waitUntil(runTosNsfwFixForTokens(c.env, newlyAdded, 5));
-    }
     return c.json(legacyOk({ message: "Token 已更新" }));
   } catch (e) {
     return c.json(legacyErr(`Update tokens failed: ${e instanceof Error ? e.message : String(e)}`), 500);
@@ -540,138 +421,6 @@ adminRoutes.post("/api/v1/admin/tokens/refresh", requireAdminAuth, async (c) => 
     return c.json(legacyOk({ results }));
   } catch (e) {
     return c.json(legacyErr(`Refresh failed: ${e instanceof Error ? e.message : String(e)}`), 500);
-  }
-});
-
-adminRoutes.get("/api/v1/admin/register/diagnose", requireAdminAuth, async (c) => {
-  try {
-    const settings = await getSettings(c.env);
-    const cf = String(settings.grok.cf_clearance ?? "").trim();
-
-    const userAgent =
-      c.req.header("user-agent") ||
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-    const deep = String(c.req.query("deep") ?? "").trim() === "1";
-    const headers: Record<string, string> = {
-      "user-agent": userAgent,
-      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    };
-    if (cf) headers.cookie = `cf_clearance=${cf}`;
-
-    const res = await fetch("https://accounts.x.ai/sign-up", { headers, redirect: "manual" });
-    const html = await res.text();
-    const title = html.match(/<title>([^<]+)<\/title>/i)?.[1]?.trim() ?? "";
-    const hasCloudflare = /cloudflare|attention required|just a moment/i.test(`${title}\n${html}`);
-
-    const stateTree = html.match(/next-router-state-tree\":\"([^\"]+)\"/)?.[1] ?? "";
-    const siteKey = html.match(/sitekey\":\"(0x4[a-zA-Z0-9_-]+)\"/)?.[1] ?? "";
-
-    const scripts = Array.from(html.matchAll(/<script[^>]+src=\"([^\"]+)\"[^>]*>/g))
-      .map((m) => m[1]!)
-      .filter((src) => src.includes("_next/static"))
-      .slice(0, 20);
-
-    let actionId = "";
-    if (deep && res.ok && scripts.length) {
-      for (const src of scripts.slice(0, 8)) {
-        const url = new URL(src, "https://accounts.x.ai/sign-up").toString();
-        const jsRes = await fetch(url, { headers: { "user-agent": userAgent, ...(cf ? { cookie: `cf_clearance=${cf}` } : {}) } });
-        if (!jsRes.ok) continue;
-        const js = await jsRes.text();
-        const m = js.match(/7f[a-fA-F0-9]{40}/);
-        if (m?.[0]) {
-          actionId = m[0];
-          break;
-        }
-      }
-    }
-
-    return c.json({
-      ok: res.ok,
-      status: res.status,
-      title,
-      cf_ray: res.headers.get("cf-ray") ?? "",
-      server: res.headers.get("server") ?? "",
-      has_cloudflare: hasCloudflare,
-      has_state_tree: Boolean(stateTree),
-      has_site_key: Boolean(siteKey),
-      scripts: scripts.length,
-      action_id_found: Boolean(actionId),
-      action_id_prefix: actionId ? `${actionId.slice(0, 8)}…` : "",
-      cf_clearance_configured: Boolean(cf),
-      note:
-        "If status is 403/503 with Cloudflare page, Workers auto-register will likely fail. Use local/docker register or provide a valid cf_clearance (best-effort).",
-    });
-  } catch (e) {
-    return c.json(legacyErr(`Diagnose failed: ${e instanceof Error ? e.message : String(e)}`), 500);
-  }
-});
-
-adminRoutes.post("/api/v1/admin/tokens/auto-register", requireAdminAuth, async (c) => {
-  try {
-    const ns = (c.env as any).AUTO_REGISTER as DurableObjectNamespace | undefined;
-    if (!ns) return c.json(legacyErr("Missing AUTO_REGISTER durable object binding"), 500);
-
-    const body = (await c.req.json().catch(() => ({}))) as any;
-    const settings = await getSettings(c.env);
-
-    const pool = String(body?.pool ?? "ssoBasic").trim() || "ssoBasic";
-    const countRaw = body?.count;
-    const concurrencyRaw = body?.concurrency;
-
-    const count = Number.isFinite(Number(countRaw)) && Number(countRaw) > 0 ? Math.floor(Number(countRaw)) : Number(settings.register.default_count ?? 100);
-    const concurrency =
-      Number.isFinite(Number(concurrencyRaw)) && Number(concurrencyRaw) > 0
-        ? Math.floor(Number(concurrencyRaw))
-        : Number(settings.register.register_threads ?? 10);
-
-    const jobId = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
-    const stub = ns.get(ns.idFromName(jobId));
-    const res = await stub.fetch("https://auto-register/start", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ job_id: jobId, total: count, pool, concurrency }),
-    });
-    const job = await res.json().catch(() => ({}));
-    if (!res.ok) return c.json(legacyErr((job as any)?.error || "Start failed"), res.status as any);
-    return c.json({ status: "started", job });
-  } catch (e) {
-    return c.json(legacyErr(`Start failed: ${e instanceof Error ? e.message : String(e)}`), 500);
-  }
-});
-adminRoutes.get("/api/v1/admin/tokens/auto-register/status", requireAdminAuth, async (c) => {
-  try {
-    const ns = (c.env as any).AUTO_REGISTER as DurableObjectNamespace | undefined;
-    if (!ns) return c.json({ status: "not_supported" }, 501);
-
-    const jobId = String(c.req.query("job_id") ?? "").trim();
-    if (!jobId) return c.json({ status: "idle" });
-
-    const stub = ns.get(ns.idFromName(jobId));
-    const res = await stub.fetch("https://auto-register/status");
-    if (res.status === 404) return c.json({ status: "not_found" }, 404);
-    const data = await res.json().catch(() => ({}));
-    return c.json(data, res.status as any);
-  } catch (e) {
-    return c.json(legacyErr(`Get status failed: ${e instanceof Error ? e.message : String(e)}`), 500);
-  }
-});
-adminRoutes.post("/api/v1/admin/tokens/auto-register/stop", requireAdminAuth, async (c) => {
-  try {
-    const ns = (c.env as any).AUTO_REGISTER as DurableObjectNamespace | undefined;
-    if (!ns) return c.json({ status: "not_supported" }, 501);
-
-    const jobId = String(c.req.query("job_id") ?? "").trim();
-    if (!jobId) return c.json(legacyErr("Missing job_id"), 400);
-
-    const stub = ns.get(ns.idFromName(jobId));
-    const res = await stub.fetch("https://auto-register/stop", { method: "POST" });
-    if (res.status === 404) return c.json({ status: "not_found" }, 404);
-    const data = await res.json().catch(() => ({}));
-    return c.json(data, res.status as any);
-  } catch (e) {
-    return c.json(legacyErr(`Stop failed: ${e instanceof Error ? e.message : String(e)}`), 500);
   }
 });
 
