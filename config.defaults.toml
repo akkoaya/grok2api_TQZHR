@@ -4,6 +4,7 @@ stream = true
 thinking = true
 dynamic_statsig = true
 filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
+video_poster_preview = false
 timeout = 120
 base_proxy_url = ""
 asset_proxy_url = ""

@@ -219,6 +219,7 @@ curl http://localhost:8000/v1/images/generations \
 |                       | `thinking`                 | 思维链       | 是否启用模型思维链输出。                             | `true`                                                  |
 |                       | `dynamic_statsig`          | 动态指纹     | 是否启用动态生成 Statsig 值。                        | `true`                                                  |
 |                       | `filter_tags`              | 过滤标签     | 自动过滤 Grok 响应中的特殊标签。                     | `["xaiartifact", "xai:tool_usage_card", "grok:render"]` |
+|                       | `video_poster_preview`     | 视频海报预览 | 将返回内容中的 `<video>` 标签替换为可点击的 Poster 预览图。 | `false`                                                 |
 |                       | `timeout`                  | 超时时间     | 请求 Grok 服务的超时时间（秒）。                     | `120`                                                   |
 |                       | `base_proxy_url`           | 基础代理 URL | 代理请求到 Grok 官网的基础服务地址。                 | `""`                                                    |
 |                       | `asset_proxy_url`          | 资源代理 URL | 代理请求到 Grok 官网的静态资源（图片/视频）地址。    | `""`                                                    |

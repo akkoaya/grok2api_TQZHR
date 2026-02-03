@@ -168,6 +168,7 @@ npx wrangler deploy
    - `dynamic_statsig`（建议开启）
    - 或者关闭动态并填写 `x_statsig_id`
    - （可选）填写 `cf_clearance`（只填值，不要 `cf_clearance=` 前缀）
+   - （可选）开启 `video_poster_preview`：将返回内容中的 `<video>` 替换为 Poster 预览图（默认关闭）
 3. **Keys**：创建 API Key，用于调用 `/v1/*`
 
 ---

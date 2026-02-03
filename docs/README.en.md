@@ -197,6 +197,7 @@ When upgrading from older versions, the service will keep existing local data an
 | | `thinking` | Thinking chain | Enable model thinking output. | `true` |
 | | `dynamic_statsig` | Dynamic fingerprint | Enable dynamic Statsig value generation. | `true` |
 | | `filter_tags` | Filter tags | Auto-filter special tags in Grok responses. | `["xaiartifact", "xai:tool_usage_card", "grok:render"]` |
+| | `video_poster_preview` | Video poster preview | Replace `<video>` tags in responses with a clickable poster preview image. | `false` |
 | | `timeout` | Timeout | Timeout for Grok requests (seconds). | `120` |
 | | `base_proxy_url` | Base proxy URL | Base service address proxying Grok official site. | `""` |
 | | `asset_proxy_url` | Asset proxy URL | Proxy URL for Grok static assets (images/videos). | `""` |

@@ -53,6 +53,26 @@ function buildVideoTag(src: string): string {
   return `<video src="${src}" controls="controls" width="500" height="300"></video>\n`;
 }
 
+function buildVideoPosterPreview(videoUrl: string, posterUrl?: string): string {
+  const href = String(videoUrl || "").replace(/"/g, "&quot;");
+  const poster = String(posterUrl || "").replace(/"/g, "&quot;");
+  if (!href) return "";
+  if (!poster) return `<a href="${href}" target="_blank" rel="noopener noreferrer">${href}</a>\n`;
+  return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="display:inline-block;position:relative;max-width:100%;text-decoration:none;">
+  <img src="${poster}" alt="video" style="max-width:100%;height:auto;border-radius:12px;display:block;" />
+  <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+    <span style="width:64px;height:64px;border-radius:9999px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;">
+      <span style="width:0;height:0;border-top:12px solid transparent;border-bottom:12px solid transparent;border-left:18px solid #fff;margin-left:4px;"></span>
+    </span>
+  </span>
+</a>\n`;
+}
+
+function buildVideoHtml(args: { videoUrl: string; posterUrl?: string; posterPreview: boolean }): string {
+  if (args.posterPreview) return buildVideoPosterPreview(args.videoUrl, args.posterUrl);
+  return buildVideoTag(args.videoUrl);
+}
+
 function base64UrlEncode(input: string): string {
   const bytes = new TextEncoder().encode(input);
   let binary = "";
@@ -210,6 +230,7 @@ export function createOpenAiStreamFromGrokNdjson(
             if (videoResp) {
               const progress = typeof videoResp.progress === "number" ? videoResp.progress : 0;
               const videoUrl = typeof videoResp.videoUrl === "string" ? videoResp.videoUrl : "";
+              const thumbUrl = typeof videoResp.thumbnailImageUrl === "string" ? videoResp.thumbnailImageUrl : "";
 
               if (progress > lastVideoProgress) {
                 lastVideoProgress = progress;
@@ -230,7 +251,27 @@ export function createOpenAiStreamFromGrokNdjson(
               if (videoUrl) {
                 const videoPath = encodeAssetPath(videoUrl);
                 const src = toImgProxyUrl(global, origin, videoPath);
-                controller.enqueue(encoder.encode(makeChunk(id, created, currentModel, buildVideoTag(src))));
+
+                let poster: string | undefined;
+                if (thumbUrl) {
+                  const thumbPath = encodeAssetPath(thumbUrl);
+                  poster = toImgProxyUrl(global, origin, thumbPath);
+                }
+
+                controller.enqueue(
+                  encoder.encode(
+                    makeChunk(
+                      id,
+                      created,
+                      currentModel,
+                      buildVideoHtml({
+                        videoUrl: src,
+                        posterPreview: settings.video_poster_preview === true,
+                        ...(poster ? { posterUrl: poster } : {}),
+                      }),
+                    ),
+                  ),
+                );
               }
               continue;
             }
@@ -343,7 +384,7 @@ export async function parseOpenAiFromGrokNdjson(
   grokResp: Response,
   opts: { cookie: string; settings: GrokSettings; global: GlobalSettings; origin: string; requestedModel: string },
 ): Promise<Record<string, unknown>> {
-  const { global, origin, requestedModel } = opts;
+  const { global, origin, requestedModel, settings } = opts;
   const text = await grokResp.text();
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
 
@@ -367,7 +408,18 @@ export async function parseOpenAiFromGrokNdjson(
     if (videoResp?.videoUrl && typeof videoResp.videoUrl === "string") {
       const videoPath = encodeAssetPath(videoResp.videoUrl);
       const src = toImgProxyUrl(global, origin, videoPath);
-      content = buildVideoTag(src);
+
+      let poster: string | undefined;
+      if (typeof videoResp.thumbnailImageUrl === "string" && videoResp.thumbnailImageUrl) {
+        const thumbPath = encodeAssetPath(videoResp.thumbnailImageUrl);
+        poster = toImgProxyUrl(global, origin, thumbPath);
+      }
+
+      content = buildVideoHtml({
+        videoUrl: src,
+        posterPreview: settings.video_poster_preview === true,
+        ...(poster ? { posterUrl: poster } : {}),
+      });
       model = requestedModel;
       break;
     }

@@ -35,6 +35,7 @@ const LOCALE_MAP = {
     "thinking": { title: "思维链", desc: "是否启用模型思维链输出。" },
     "dynamic_statsig": { title: "动态指纹", desc: "是否启用动态生成 Statsig 值。" },
     "filter_tags": { title: "过滤标签", desc: "自动过滤 Grok 响应中的特殊标签。" },
+    "video_poster_preview": { title: "视频海报预览", desc: "启用后会将返回内容中的 <video> 标签替换为带播放按钮的 Poster 预览图；点击预览图会在新标签页打开视频（默认关闭）。" },
     "timeout": { title: "超时时间", desc: "请求 Grok 服务的超时时间（秒）。" },
     "base_proxy_url": { title: "基础代理 URL", desc: "代理请求到 Grok 官网的基础服务地址。" },
     "asset_proxy_url": { title: "资源代理 URL", desc: "代理请求到 Grok 官网的静态资源（图片/视频）地址。" },

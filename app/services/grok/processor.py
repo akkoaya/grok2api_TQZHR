@@ -4,6 +4,7 @@ OpenAI 响应格式处理器
 import time
 import uuid
 import random
+import html
 import orjson
 from typing import Any, AsyncGenerator, Optional, AsyncIterable, List
 
@@ -13,6 +14,27 @@ from app.services.grok.assets import DownloadService
 
 
 ASSET_URL = "https://assets.grok.com/"
+
+
+def _build_video_poster_preview(video_url: str, thumbnail_url: str = "") -> str:
+    """将 <video> 替换为可点击的 Poster 预览图（用于前端展示）"""
+    safe_video = html.escape(video_url or "", quote=True)
+    safe_thumb = html.escape(thumbnail_url or "", quote=True)
+
+    if not safe_video:
+        return ""
+
+    if not safe_thumb:
+        return f'<a href="{safe_video}" target="_blank" rel="noopener noreferrer">{safe_video}</a>'
+
+    return f'''<a href="{safe_video}" target="_blank" rel="noopener noreferrer" style="display:inline-block;position:relative;max-width:100%;text-decoration:none;">
+  <img src="{safe_thumb}" alt="video" style="max-width:100%;height:auto;border-radius:12px;display:block;" />
+  <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+    <span style="width:64px;height:64px;border-radius:9999px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;">
+      <span style="width:0;height:0;border-top:12px solid transparent;border-bottom:12px solid transparent;border-left:18px solid #fff;margin-left:4px;"></span>
+    </span>
+  </span>
+</a>'''
 
 
 class BaseProcessor:
@@ -269,6 +291,8 @@ class VideoStreamProcessor(BaseProcessor):
     
     def _build_video_html(self, video_url: str, thumbnail_url: str = "") -> str:
         """构建视频 HTML 标签"""
+        if get_config("grok.video_poster_preview", False):
+            return _build_video_poster_preview(video_url, thumbnail_url)
         poster_attr = f' poster="{thumbnail_url}"' if thumbnail_url else ""
         return f'''<video id="video" controls="" preload="none"{poster_attr}>
   <source id="mp4" src="{video_url}" type="video/mp4">
@@ -343,6 +367,8 @@ class VideoCollectProcessor(BaseProcessor):
         self.video_format = get_config("app.video_format", "url")
     
     def _build_video_html(self, video_url: str, thumbnail_url: str = "") -> str:
+        if get_config("grok.video_poster_preview", False):
+            return _build_video_poster_preview(video_url, thumbnail_url)
         poster_attr = f' poster="{thumbnail_url}"' if thumbnail_url else ""
         return f'''<video id="video" controls="" preload="none"{poster_attr}>
   <source id="mp4" src="{video_url}" type="video/mp4">
