@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Body
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from app.core.auth import verify_api_key
@@ -33,10 +33,22 @@ async def render_template(filename: str):
         content = await f.read()
     return HTMLResponse(content)
 
+@router.get("/", include_in_schema=False)
+async def root_redirect():
+    """Default entry -> /login (consistent with Workers/Pages)."""
+    return RedirectResponse(url="/login", status_code=302)
+
+
+@router.get("/login", response_class=HTMLResponse, include_in_schema=False)
+async def login_page():
+    """Login page (default)."""
+    return await render_template("login/login.html")
+
+
 @router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 async def admin_login_page():
-    """管理后台登录页"""
-    return await render_template("login/login.html")
+    """Legacy login entry (redirect to /login)."""
+    return RedirectResponse(url="/login", status_code=302)
 
 @router.get("/admin/config", response_class=HTMLResponse, include_in_schema=False)
 async def admin_config_page():

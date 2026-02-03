@@ -40,7 +40,7 @@ docker compose up -d
 
 ### 管理面板
 
-访问地址：`http://<host>:8000/admin`
+访问地址：`http://<host>:8000/login`
 
 默认账号密码：`admin` / `admin`（对应配置项 `app.admin_username` / `app.app_key`，建议上线后修改）。
 

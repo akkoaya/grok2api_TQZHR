@@ -40,7 +40,7 @@ docker compose up -d
 
 ### Admin panel
 
-URL: `http://<host>:8000/admin`  
+URL: `http://<host>:8000/login`  
 Default username/password: `admin` / `admin` (config keys `app.admin_username` / `app.app_key`, change it in production).
 
 Pages:
