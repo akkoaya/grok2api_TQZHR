@@ -22,6 +22,17 @@ binding = "KV_CACHE"
 # Filled by CI / your first deployment bootstrap.
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
+# Durable Objects migrations history:
+# - do-v1 created AutoRegisterJob (now removed)
+# - do-v2 deletes it so the Worker can deploy without exporting the class
+[[migrations]]
+tag = "do-v1"
+new_sqlite_classes = ["AutoRegisterJob"]
+
+[[migrations]]
+tag = "do-v2"
+deleted_classes = ["AutoRegisterJob"]
+
 [vars]
 # Daily reset at local midnight (default: Asia/Shanghai, UTC+8).
 # Make sure the cron below matches this offset.
