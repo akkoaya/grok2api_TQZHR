@@ -107,6 +107,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @app.get("/health")
+    async def health():
+        return {"status": "healthy", "service": "Grok2API", "runtime": "python-fastapi"}
+
     # CORS 配置
     app.add_middleware(
         CORSMiddleware,

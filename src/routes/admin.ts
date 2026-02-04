@@ -402,14 +402,34 @@ adminRoutes.post("/api/v1/admin/tokens/refresh", requireAdminAuth, async (c) => 
     const settings = await getSettings(c.env);
     const cf = normalizeCfCookie(settings.grok.cf_clearance ?? "");
 
+    const placeholders = unique.map(() => "?").join(",");
+    const typeRows = placeholders
+      ? await dbAll<{ token: string; token_type: string }>(
+          c.env.DB,
+          `SELECT token, token_type FROM tokens WHERE token IN (${placeholders})`,
+          unique,
+        )
+      : [];
+    const tokenTypeByToken = new Map(typeRows.map((r) => [r.token, r.token_type]));
+
     const results: Record<string, boolean> = {};
     for (const t of unique) {
       try {
         const cookie = cf ? `sso-rw=${t};sso=${t};${cf}` : `sso-rw=${t};sso=${t}`;
+        const tokenType = tokenTypeByToken.get(t) ?? "sso";
         const r = await checkRateLimits(cookie, settings.grok, "grok-4-fast");
         const remaining = (r as any)?.remainingTokens;
+        let heavyRemaining: number | null = null;
+        if (tokenType === "ssoSuper") {
+          const rh = await checkRateLimits(cookie, settings.grok, "grok-4-heavy");
+          const hv = (rh as any)?.remainingTokens;
+          if (typeof hv === "number") heavyRemaining = hv;
+        }
         if (typeof remaining === "number") {
-          await updateTokenLimits(c.env.DB, t, { remaining_queries: remaining });
+          await updateTokenLimits(c.env.DB, t, {
+            remaining_queries: remaining,
+            ...(heavyRemaining !== null ? { heavy_remaining_queries: heavyRemaining } : {}),
+          });
           results[`sso=${t}`] = true;
         } else {
           results[`sso=${t}`] = false;
@@ -704,11 +724,26 @@ adminRoutes.post("/api/tokens/test", requireAdminAuth, async (c) => {
     if (result) {
       const remaining = (result as any).remainingTokens ?? -1;
       const limit = (result as any).limit ?? -1;
-      await updateTokenLimits(c.env.DB, token, { remaining_queries: typeof remaining === "number" ? remaining : -1 });
+
+      let heavyRemaining: number | null = null;
+      if (token_type === "ssoSuper") {
+        const heavy = await checkRateLimits(cookie, settings.grok, "grok-4-heavy");
+        const v = (heavy as any)?.remainingTokens;
+        if (typeof v === "number") heavyRemaining = v;
+      }
+      await updateTokenLimits(c.env.DB, token, {
+        remaining_queries: typeof remaining === "number" ? remaining : -1,
+        ...(heavyRemaining !== null ? { heavy_remaining_queries: heavyRemaining } : {}),
+      });
       return c.json({
         success: true,
         message: "Token有效",
-        data: { valid: true, remaining_queries: typeof remaining === "number" ? remaining : -1, limit },
+        data: {
+          valid: true,
+          remaining_queries: typeof remaining === "number" ? remaining : -1,
+          heavy_remaining_queries: heavyRemaining !== null ? heavyRemaining : -1,
+          limit,
+        },
       });
     }
 
@@ -780,7 +815,18 @@ adminRoutes.post("/api/tokens/refresh-all", requireAdminAuth, async (c) => {
           const r = await checkRateLimits(cookie, settings.grok, "grok-4-fast");
           if (r) {
             const remaining = (r as any).remainingTokens;
-            if (typeof remaining === "number") await updateTokenLimits(c.env.DB, t.token, { remaining_queries: remaining });
+            let heavyRemaining: number | null = null;
+            if (t.token_type === "ssoSuper") {
+              const rh = await checkRateLimits(cookie, settings.grok, "grok-4-heavy");
+              const hv = (rh as any)?.remainingTokens;
+              if (typeof hv === "number") heavyRemaining = hv;
+            }
+            if (typeof remaining === "number") {
+              await updateTokenLimits(c.env.DB, t.token, {
+                remaining_queries: remaining,
+                ...(heavyRemaining !== null ? { heavy_remaining_queries: heavyRemaining } : {}),
+              });
+            }
             success += 1;
           } else {
             failed += 1;

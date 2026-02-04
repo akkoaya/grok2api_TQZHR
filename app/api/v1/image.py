@@ -121,8 +121,7 @@ async def create_image(request: ImageGenerationRequest):
     try:
         token_mgr = await get_token_manager()
         await token_mgr.reload_if_stale()
-        pool_name = ModelService.pool_for_model(request.model)
-        token = token_mgr.get_token(pool_name)
+        token = token_mgr.get_token_for_model(request.model)
     except Exception as e:
         logger.error(f"Failed to get token: {e}")
         try:

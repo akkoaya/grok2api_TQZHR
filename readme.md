@@ -28,6 +28,9 @@
 uv sync
 
 uv run main.py
+
+# （可选）启动后自检
+python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 ```
 
 - 项目部署
@@ -35,8 +38,26 @@ uv run main.py
 ```
 git clone https://github.com/TQZHR/grok2api.git
 
+# 进入项目目录
+cd grok2api
+
+# 直接拉取镜像启动（默认）
 docker compose up -d
+
+# 更新到最新镜像
+docker compose pull
+docker compose up -d
+
+# 从当前仓库源码构建并启动（可选）
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+# （可选）启动后自检
+python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 ```
+
+> 如果拉取镜像时报 `denied`：说明 GHCR 镜像不可匿名拉取（未公开或需要登录）。你可以先执行 `docker login ghcr.io`，或在 `.env` 里设置 `GROK2API_IMAGE` 指向你自己的公开镜像；也可以用上面的 `--build` 从源码构建运行。
+
+> 可选：复制 `.env.example` 为 `.env`，可配置端口/日志/存储等；并可通过 `COMPOSE_PROFILES` 一键启用 `redis/pgsql/mysql`（见 `.env.example` 内示例）。
 
 ### 管理面板
 
