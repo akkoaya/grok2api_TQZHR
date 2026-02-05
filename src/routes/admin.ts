@@ -9,6 +9,7 @@ import {
   batchUpdateApiKeyStatus,
   deleteApiKey,
   listApiKeys,
+  updateApiKeyLimits,
   updateApiKeyName,
   updateApiKeyStatus,
 } from "../repo/apiKeys";
@@ -36,6 +37,7 @@ import {
 } from "../repo/cache";
 import { dbAll, dbFirst, dbRun } from "../db";
 import { nowMs } from "../utils/time";
+import { listUsageForDay, localDayString } from "../repo/apiKeyUsage";
 
 function jsonError(message: string, code: string): Record<string, unknown> {
   return { error: message, code };
@@ -905,6 +907,126 @@ adminRoutes.get("/api/request-stats", requireAdminAuth, async (c) => {
     return c.json({ success: true, data: stats });
   } catch (e) {
     return c.json(jsonError(`获取失败: ${e instanceof Error ? e.message : String(e)}`, "REQUEST_STATS_ERROR"), 500);
+  }
+});
+
+// === API Keys (admin UI) ===
+function randomKeyName(): string {
+  return `key-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+adminRoutes.get("/api/v1/admin/keys", requireAdminAuth, async (c) => {
+  try {
+    const keys = await listApiKeys(c.env.DB);
+    const tz = Math.max(-720, Math.min(840, Number(c.env.CACHE_RESET_TZ_OFFSET_MINUTES ?? 480)));
+    const day = localDayString(nowMs(), tz);
+    const usageRows = await listUsageForDay(c.env.DB, day);
+    const usageMap = new Map(usageRows.map((r) => [r.key, r]));
+
+    const data = keys.map((k) => {
+      const used = usageMap.get(k.key) ?? { chat_used: 0, heavy_used: 0, image_used: 0, video_used: 0 };
+      const remaining = {
+        chat: k.chat_limit < 0 ? null : Math.max(0, k.chat_limit - Number((used as any).chat_used ?? 0)),
+        heavy: k.heavy_limit < 0 ? null : Math.max(0, k.heavy_limit - Number((used as any).heavy_used ?? 0)),
+        image: k.image_limit < 0 ? null : Math.max(0, k.image_limit - Number((used as any).image_used ?? 0)),
+        video: k.video_limit < 0 ? null : Math.max(0, k.video_limit - Number((used as any).video_used ?? 0)),
+      };
+      return {
+        ...k,
+        is_active: Boolean(k.is_active),
+        display_key: displayKey(k.key),
+        usage_today: {
+          chat_used: Number((used as any).chat_used ?? 0),
+          heavy_used: Number((used as any).heavy_used ?? 0),
+          image_used: Number((used as any).image_used ?? 0),
+          video_used: Number((used as any).video_used ?? 0),
+        },
+        remaining_today: remaining,
+      };
+    });
+
+    return c.json({ success: true, data });
+  } catch (e) {
+    return c.json(jsonError(`鑾峰彇澶辫触: ${e instanceof Error ? e.message : String(e)}`, "ADMIN_KEYS_LIST_ERROR"), 500);
+  }
+});
+
+adminRoutes.post("/api/v1/admin/keys", requireAdminAuth, async (c) => {
+  try {
+    const body = (await c.req.json()) as any;
+    const name = String(body?.name ?? "").trim() || randomKeyName();
+    const key = String(body?.key ?? "").trim();
+    const limits = body?.limits && typeof body.limits === "object" ? body.limits : {};
+
+    const row = await addApiKey(c.env.DB, name, {
+      ...(key ? { key } : {}),
+      limits: {
+        chat_limit: limits.chat_per_day ?? limits.chat_limit,
+        heavy_limit: limits.heavy_per_day ?? limits.heavy_limit,
+        image_limit: limits.image_per_day ?? limits.image_limit,
+        video_limit: limits.video_per_day ?? limits.video_limit,
+      },
+    });
+
+    const isActive = body?.is_active !== undefined ? Boolean(body.is_active) : true;
+    if (!isActive) await updateApiKeyStatus(c.env.DB, row.key, false);
+
+    return c.json({ success: true, data: { ...row, is_active: isActive, display_key: displayKey(row.key) } });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/UNIQUE|constraint/i.test(msg)) return c.json(jsonError("Key 已存在", "KEY_EXISTS"), 400);
+    return c.json(jsonError(`创建失败: ${msg}`, "ADMIN_KEYS_CREATE_ERROR"), 500);
+  }
+});
+
+adminRoutes.post("/api/v1/admin/keys/update", requireAdminAuth, async (c) => {
+  try {
+    const body = (await c.req.json()) as any;
+    const key = String(body?.key ?? "").trim();
+    if (!key) return c.json(jsonError("Missing key", "MISSING_KEY"), 400);
+
+    if (body?.name !== undefined) {
+      const name = String(body.name ?? "").trim();
+      if (name) await updateApiKeyName(c.env.DB, key, name);
+    }
+
+    if (body?.is_active !== undefined) {
+      await updateApiKeyStatus(c.env.DB, key, Boolean(body.is_active));
+    }
+
+    if (body?.limits && typeof body.limits === "object") {
+      const limits = body.limits;
+      await updateApiKeyLimits(c.env.DB, key, {
+        ...(limits.chat_per_day !== undefined || limits.chat_limit !== undefined
+          ? { chat_limit: limits.chat_per_day ?? limits.chat_limit }
+          : {}),
+        ...(limits.heavy_per_day !== undefined || limits.heavy_limit !== undefined
+          ? { heavy_limit: limits.heavy_per_day ?? limits.heavy_limit }
+          : {}),
+        ...(limits.image_per_day !== undefined || limits.image_limit !== undefined
+          ? { image_limit: limits.image_per_day ?? limits.image_limit }
+          : {}),
+        ...(limits.video_per_day !== undefined || limits.video_limit !== undefined
+          ? { video_limit: limits.video_per_day ?? limits.video_limit }
+          : {}),
+      });
+    }
+
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json(jsonError(`更新失败: ${e instanceof Error ? e.message : String(e)}`, "ADMIN_KEYS_UPDATE_ERROR"), 500);
+  }
+});
+
+adminRoutes.post("/api/v1/admin/keys/delete", requireAdminAuth, async (c) => {
+  try {
+    const body = (await c.req.json()) as any;
+    const key = String(body?.key ?? "").trim();
+    if (!key) return c.json(jsonError("Missing key", "MISSING_KEY"), 400);
+    const ok = await deleteApiKey(c.env.DB, key);
+    return c.json(ok ? { success: true } : jsonError("Key not found", "NOT_FOUND"), ok ? 200 : 404);
+  } catch (e) {
+    return c.json(jsonError(`删除失败: ${e instanceof Error ? e.message : String(e)}`, "ADMIN_KEYS_DELETE_ERROR"), 500);
   }
 });
 
