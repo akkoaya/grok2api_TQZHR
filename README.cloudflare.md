@@ -2,6 +2,9 @@
 
 这个仓库已经新增 **Cloudflare Workers / Pages** 可部署版本（TypeScript）。
 
+> 一键部署前置条件：若使用 GitHub Actions 工作流，请先在仓库 Secrets 配置 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。  
+> Docker 一键启动入口仍是 `docker compose up -d`，请参考 `readme.md`。
+
 ## 功能概览
 
 - **D1（SQLite）**：持久化 Tokens / API Keys / 管理员会话 / 配置 / 日志
