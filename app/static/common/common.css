@@ -511,11 +511,11 @@ body {
   .nav-divider,
   .nav-desktop-links,
   .nav-desktop-actions {
-    display: none;
+    display: none !important;
   }
 
   .mobile-nav-toggle {
-    display: inline-flex;
+    display: inline-flex !important;
   }
 
   .app-footer {
