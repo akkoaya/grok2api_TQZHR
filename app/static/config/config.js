@@ -260,12 +260,12 @@ function renderConfig(data) {
 
         if (key === 'api_key' || key === 'app_key') {
           const wrapper = document.createElement('div');
-          wrapper.className = 'flex items-center gap-2';
+          wrapper.className = 'config-secret-row';
 
-          input.className = 'geist-input flex-1 h-[34px]';
+          input.className = 'geist-input';
 
           const copyBtn = document.createElement('button');
-          copyBtn.className = 'flex-none w-[32px] h-[32px] flex items-center justify-center bg-black text-white rounded-md hover:opacity-80 transition-opacity';
+          copyBtn.className = 'config-copy-btn';
           copyBtn.type = 'button';
           copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 

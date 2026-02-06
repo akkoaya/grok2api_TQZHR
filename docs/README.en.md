@@ -74,6 +74,15 @@ Pages:
 - `http://<host>:8000/admin/config`: Configuration (including auto register settings)
 - `http://<host>:8000/admin/cache`: Cache management (local cache + online assets)
 
+### Mobile Responsiveness (Site-wide)
+
+- Covered pages: `/login`, `/admin/token`, `/admin/keys`, `/admin/cache`, `/admin/config`, `/admin/datacenter`, `/chat`, `/admin/chat`.
+- Admin top navigation now uses a mobile drawer (open/close, click-mask-to-close, auto-close on link click, `Esc` to close).
+- Tables keep a horizontal-scroll-first strategy on mobile (no forced card conversion).
+- Toast notifications are edge-aware on narrow screens (no fixed minimum width overflow).
+- Bottom batch action bars (Token/Cache) switch to full-width bottom cards on mobile to reduce interaction blocking.
+- Same behavior across Local FastAPI, Docker, and Cloudflare Workers because they share the same static frontend assets.
+
 ### Token Management Enhancements (Filters + State Rules)
 
 - Type filters: `sso`, `supersso` (combinable).
@@ -91,6 +100,9 @@ Pages:
 - New stat cards: total, active, inactive, exhausted today.
 - Toolbar supports search (name/key), status filter (all/active/inactive/exhausted), and reset.
 - Create/edit modal improvements:
+  - Centered floating modal with mask + entrance animation
+  - Click mask or press `Esc` to close
+  - Responsive modal grid and scroll behavior on mobile
   - Auto-generate key
   - Quick quota presets (recommended/unlimited)
   - Disable submit button while submitting (prevent duplicate submit)

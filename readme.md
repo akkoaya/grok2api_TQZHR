@@ -77,6 +77,15 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 - `http://<host>:8000/admin/config`：配置管理（含自动注册所需配置）
 - `http://<host>:8000/admin/cache`：缓存管理（本地缓存 + 在线资产）
 
+### 手机端适配（全站）
+
+- 已覆盖页面：`/login`、`/admin/token`、`/admin/keys`、`/admin/cache`、`/admin/config`、`/admin/datacenter`、`/chat`、`/admin/chat`。
+- 后台顶部导航在手机端改为抽屉菜单（支持：打开/关闭、点击遮罩关闭、点击菜单项后自动收起、`Esc` 关闭）。
+- 表格在手机端保持“横向滚动优先”，不压缩列结构（Token/API Key/缓存表格行为一致）。
+- Toast 在窄屏改为左右边距自适应，不再固定最小宽度导致溢出。
+- 底部批量操作条（Token/缓存）在手机端改为全宽底部卡片样式，减少遮挡主操作。
+- 三部署一致性：上述适配使用同一套静态资源，在本地 FastAPI / Docker / Cloudflare Workers 下行为一致。
+
 ### Token 管理增强（筛选 + 状态判定）
 
 - 支持类型筛选：`sso`、`supersso`（可组合）。
@@ -94,6 +103,9 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 - 页面新增统计卡片：总数、启用、禁用、今日额度用尽。
 - 工具栏支持：名称/Key 搜索、状态筛选（全部/启用/禁用/额度用尽）、重置筛选。
 - 新增 API Key 弹窗增强：
+  - 居中悬浮弹窗（遮罩层 + 缩放入场动画）
+  - 支持点击遮罩关闭、`Esc` 关闭
+  - 移动端弹窗内容可滚动且网格布局自适应
   - 自动生成 Key
   - 额度预设（推荐/不限）
   - 提交中禁用按钮，防止重复提交

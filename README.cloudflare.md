@@ -7,6 +7,7 @@
 - **D1（SQLite）**：持久化 Tokens / API Keys / 管理员会话 / 配置 / 日志
 - **KV**：缓存 `/images/*` 的图片/视频资源（从 `assets.grok.com` 代理抓取）
 - **每天 0 点统一清除**：通过 KV `expiration` + Workers Cron 定时清理元数据（`wrangler.toml` 已配置，默认按北京时间 00:00）
+- **前端移动端适配一致生效**：Workers 与 FastAPI/Docker 复用同一套 `/static/*` 资源，包含手机端抽屉导航、表格横向滚动、API Key 居中悬浮新增弹窗等交互
 
 > 原 Python/FastAPI 版本仍保留用于本地/Docker；Cloudflare 部署请按本文件走 Worker 版本。
 
@@ -255,7 +256,11 @@ region = "aws:us-east-1"
 2. 管理页可访问性：
    - `GET /admin/token`
    - `GET /admin/keys`
-3. 可选 smoke test：
+3. 移动端回归（建议使用 `390x844`）：
+   - `/admin/keys`：点击“新增 Key”后应为居中悬浮弹窗（有遮罩，可点遮罩关闭，可 `Esc` 关闭）
+   - 顶部导航：手机端应为抽屉菜单（可打开/关闭，点击菜单项后自动收起）
+   - Token/Keys/Cache 表格：应保持横向滚动，不应压碎列布局
+4. 可选 smoke test：
 
 ```bash
 python scripts/smoke_test.py --base-url https://<你的域名或workers.dev>
