@@ -191,6 +191,10 @@ adminRoutes.get("/api/v1/admin/config", requireAdminAuth, async (c) => {
         cf_clearance: String(settings.grok.cf_clearance ?? ""),
         max_retry: 3,
         retry_status_codes: Array.isArray(settings.grok.retry_status_codes) ? settings.grok.retry_status_codes : [401, 429, 403],
+        image_generation_method:
+          settings.grok.image_generation_method === "imagine_ws_experimental"
+            ? "imagine_ws_experimental"
+            : "legacy",
       },
       token: {
         auto_refresh: Boolean(settings.token.auto_refresh),
@@ -257,6 +261,9 @@ adminRoutes.post("/api/v1/admin/config", requireAdminAuth, async (c) => {
       if (Array.isArray(grokCfg.retry_status_codes))
         grok_config.retry_status_codes = grokCfg.retry_status_codes.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n));
       if (Number.isFinite(Number(grokCfg.timeout))) grok_config.stream_total_timeout = Math.max(1, Math.floor(Number(grokCfg.timeout)));
+      if (grokCfg.image_generation_method === "legacy" || grokCfg.image_generation_method === "imagine_ws_experimental") {
+        grok_config.image_generation_method = grokCfg.image_generation_method;
+      }
     }
 
     if (tokenCfg && typeof tokenCfg === "object") {

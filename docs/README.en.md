@@ -314,6 +314,7 @@ When upgrading from older versions, the service will keep existing local data an
 | | `cf_clearance` | CF Clearance | Cloudflare clearance cookie for verification. | `""` |
 | | `max_retry` | Max retries | Max retries on Grok request failure. | `3` |
 | | `retry_status_codes` | Retry status codes | HTTP status codes that trigger retry. | `[401, 429, 403]` |
+| | `image_generation_method` | Image generation method | Image invoke method (`legacy` is stable default; `imagine_ws_experimental` is experimental). | `legacy` |
 | **token** | `auto_refresh` | Auto refresh | Enable automatic token refresh. | `true` |
 | | `refresh_interval_hours` | Refresh interval | Token refresh interval (hours). | `8` |
 | | `fail_threshold` | Failure threshold | Consecutive failures before a token is disabled. | `5` |

@@ -8,16 +8,23 @@ import random
 from pathlib import Path
 from typing import List, Optional, Union
 
+import orjson
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.auth import verify_api_key
 from app.core.config import get_config
-from app.core.exceptions import AppException, ErrorType, ValidationException
+from app.core.exceptions import AppException, ErrorType, UpstreamException, ValidationException
 from app.core.logger import logger
 from app.services.grok.assets import UploadService
 from app.services.grok.chat import GrokChatService
+from app.services.grok.imagine_experimental import (
+    IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL,
+    IMAGE_METHOD_LEGACY,
+    ImagineExperimentalService,
+    resolve_image_generation_method,
+)
 from app.services.grok.model import ModelService
 from app.services.grok.processor import ImageCollectProcessor, ImageStreamProcessor
 from app.services.quota import enforce_daily_quota
@@ -152,7 +159,13 @@ def response_field_name(response_format: str) -> str:
     return "b64_json"
 
 
-async def call_grok(
+def _image_generation_method() -> str:
+    return resolve_image_generation_method(
+        get_config("grok.image_generation_method", IMAGE_METHOD_LEGACY)
+    )
+
+
+async def call_grok_legacy(
     token: str,
     prompt: str,
     model_info,
@@ -184,6 +197,132 @@ async def call_grok(
     except Exception as e:
         logger.error(f"Grok image call failed: {e}")
         return []
+
+
+async def call_grok_experimental_ws(
+    token: str,
+    prompt: str,
+    response_format: str = "b64_json",
+    n: int = 4,
+) -> List[str]:
+    service = ImagineExperimentalService()
+    raw_urls = await service.generate_ws(token=token, prompt=prompt, n=n)
+    return await service.convert_urls(token=token, urls=raw_urls, response_format=response_format)
+
+
+async def call_grok_experimental_edit(
+    token: str,
+    prompt: str,
+    model_id: str,
+    file_uris: List[str],
+    response_format: str = "b64_json",
+) -> List[str]:
+    service = ImagineExperimentalService()
+    response = await service.chat_edit(token=token, prompt=prompt, file_uris=file_uris)
+    processor = ImageCollectProcessor(
+        model_id,
+        token,
+        response_format=response_format,
+    )
+    return await processor.process(response)
+
+
+async def _collect_experimental_generation_images(
+    token: str,
+    prompt: str,
+    n: int,
+    response_format: str,
+) -> List[str]:
+    # WebSocket imagine path usually returns up to ~4 final images per request.
+    calls_needed = (n + 3) // 4
+    if calls_needed == 1:
+        images = await call_grok_experimental_ws(
+            token,
+            prompt,
+            response_format=response_format,
+            n=min(4, n),
+        )
+        if not images:
+            raise UpstreamException("Experimental imagine websocket returned no images")
+        return images
+
+    tasks = []
+    remain = n
+    for _ in range(calls_needed):
+        target_n = max(1, min(4, remain))
+        remain -= target_n
+        tasks.append(
+            call_grok_experimental_ws(
+                token,
+                prompt,
+                response_format=response_format,
+                n=target_n,
+            )
+        )
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    all_images: List[str] = []
+    for result in results:
+        if isinstance(result, Exception):
+            logger.warning(f"Experimental imagine websocket call failed: {result}")
+            continue
+        if isinstance(result, list):
+            all_images.extend(result)
+    if not all_images:
+        raise UpstreamException("Experimental imagine websocket returned no images")
+    return all_images
+
+
+def _sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {orjson.dumps(data).decode()}\n\n"
+
+
+async def _synthetic_image_stream(
+    selected_images: List[str],
+    response_field: str,
+):
+    emitted = False
+    for idx, image in enumerate(selected_images):
+        if not isinstance(image, str) or not image or image == "error":
+            continue
+        emitted = True
+        yield _sse_event(
+            "image_generation.partial_image",
+            {
+                "type": "image_generation.partial_image",
+                response_field: "",
+                "index": idx,
+                "progress": 100,
+            },
+        )
+        yield _sse_event(
+            "image_generation.completed",
+            {
+                "type": "image_generation.completed",
+                response_field: image,
+                "index": idx,
+                "usage": {
+                    "total_tokens": 50,
+                    "input_tokens": 25,
+                    "output_tokens": 25,
+                    "input_tokens_details": {"text_tokens": 5, "image_tokens": 20},
+                },
+            },
+        )
+    if not emitted:
+        yield _sse_event(
+            "image_generation.completed",
+            {
+                "type": "image_generation.completed",
+                response_field: "error",
+                "index": 0,
+                "usage": {
+                    "total_tokens": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
+                },
+            },
+        )
 
 
 async def _record_request(model_id: str, success: bool):
@@ -270,8 +409,53 @@ async def create_image(
     await enforce_daily_quota(api_key, model_id, image_count=n)
     token_mgr, token = await _get_token_for_model(model_id)
     model_info = ModelService.get(model_id)
+    image_method = _image_generation_method()
 
     if request.stream:
+        if image_method == IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL:
+            try:
+                all_images = await _collect_experimental_generation_images(
+                    token=token,
+                    prompt=request.prompt,
+                    n=n,
+                    response_format=response_format,
+                )
+                selected_images = _pick_images(all_images, n)
+
+                async def _wrapped_experimental_stream():
+                    completed = False
+                    try:
+                        async for chunk in _synthetic_image_stream(selected_images, response_field):
+                            yield chunk
+                        completed = any(
+                            isinstance(img, str) and img and img != "error"
+                            for img in selected_images
+                        )
+                    finally:
+                        try:
+                            if completed:
+                                await token_mgr.sync_usage(
+                                    token,
+                                    model_info.model_id,
+                                    consume_on_fail=True,
+                                    is_usage=True,
+                                )
+                                await _record_request(model_info.model_id, True)
+                            else:
+                                await _record_request(model_info.model_id, False)
+                        except Exception:
+                            pass
+
+                return StreamingResponse(
+                    _wrapped_experimental_stream(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Experimental image generation stream failed, fallback to legacy: {e}"
+                )
+
         chat_service = GrokChatService()
         try:
             response = await chat_service.chat(
@@ -320,31 +504,44 @@ async def create_image(
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
 
-    calls_needed = (n + 1) // 2
-    if calls_needed == 1:
-        all_images = await call_grok(
-            token,
-            f"Image Generation: {request.prompt}",
-            model_info,
-            response_format=response_format,
-        )
-    else:
-        tasks = [
-            call_grok(
+    all_images: List[str] = []
+    if image_method == IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL:
+        try:
+            all_images = await _collect_experimental_generation_images(
+                token=token,
+                prompt=request.prompt,
+                n=n,
+                response_format=response_format,
+            )
+        except Exception as e:
+            logger.warning(f"Experimental image generation failed, fallback to legacy: {e}")
+
+    if not all_images:
+        calls_needed = (n + 1) // 2
+        if calls_needed == 1:
+            all_images = await call_grok_legacy(
                 token,
                 f"Image Generation: {request.prompt}",
                 model_info,
                 response_format=response_format,
             )
-            for _ in range(calls_needed)
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        all_images = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Concurrent call failed: {result}")
-            elif isinstance(result, list):
-                all_images.extend(result)
+        else:
+            tasks = [
+                call_grok_legacy(
+                    token,
+                    f"Image Generation: {request.prompt}",
+                    model_info,
+                    response_format=response_format,
+                )
+                for _ in range(calls_needed)
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            all_images = []
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Concurrent call failed: {result}")
+                elif isinstance(result, list):
+                    all_images.extend(result)
 
     selected_images = _pick_images(all_images, n)
     success = any(isinstance(img, str) and img and img != "error" for img in selected_images)
@@ -465,16 +662,65 @@ async def edit_image(
     model_info = ModelService.get(model_id)
 
     file_ids: List[str] = []
+    file_uris: List[str] = []
     upload_service = UploadService()
     try:
         for payload in image_payloads:
-            file_id, _ = await upload_service.upload(payload, token)
+            file_id, file_uri = await upload_service.upload(payload, token)
             if file_id:
                 file_ids.append(file_id)
+            if file_uri:
+                file_uris.append(file_uri)
     finally:
         await upload_service.close()
 
+    image_method = _image_generation_method()
+
     if edit_request.stream:
+        if image_method == IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL:
+            try:
+                service = ImagineExperimentalService()
+                response = await service.chat_edit(
+                    token=token,
+                    prompt=edit_request.prompt,
+                    file_uris=file_uris,
+                )
+                processor = ImageStreamProcessor(
+                    model_info.model_id,
+                    token,
+                    n=n,
+                    response_format=response_format,
+                )
+
+                async def _wrapped_experimental_stream():
+                    completed = False
+                    try:
+                        async for chunk in processor.process(response):
+                            yield chunk
+                        completed = True
+                    finally:
+                        try:
+                            if completed:
+                                await token_mgr.sync_usage(
+                                    token,
+                                    model_info.model_id,
+                                    consume_on_fail=True,
+                                    is_usage=True,
+                                )
+                                await _record_request(model_info.model_id, True)
+                            else:
+                                await _record_request(model_info.model_id, False)
+                        except Exception:
+                            pass
+
+                return StreamingResponse(
+                    _wrapped_experimental_stream(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+                )
+            except Exception as e:
+                logger.warning(f"Experimental image edit stream failed, fallback to legacy: {e}")
+
         chat_service = GrokChatService()
         try:
             response = await chat_service.chat(
@@ -524,33 +770,68 @@ async def edit_image(
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
 
-    calls_needed = (n + 1) // 2
-    if calls_needed == 1:
-        all_images = await call_grok(
-            token,
-            f"Image Edit: {edit_request.prompt}",
-            model_info,
-            file_attachments=file_ids,
-            response_format=response_format,
-        )
-    else:
-        tasks = [
-            call_grok(
+    all_images: List[str] = []
+    if image_method == IMAGE_METHOD_IMAGINE_WS_EXPERIMENTAL:
+        try:
+            calls_needed = (n + 1) // 2
+            if calls_needed == 1:
+                all_images = await call_grok_experimental_edit(
+                    token=token,
+                    prompt=edit_request.prompt,
+                    model_id=model_info.model_id,
+                    file_uris=file_uris,
+                    response_format=response_format,
+                )
+            else:
+                tasks = [
+                    call_grok_experimental_edit(
+                        token=token,
+                        prompt=edit_request.prompt,
+                        model_id=model_info.model_id,
+                        file_uris=file_uris,
+                        response_format=response_format,
+                    )
+                    for _ in range(calls_needed)
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.warning(f"Experimental image edit call failed: {result}")
+                    elif isinstance(result, list):
+                        all_images.extend(result)
+            if not all_images:
+                raise UpstreamException("Experimental image edit returned no images")
+        except Exception as e:
+            logger.warning(f"Experimental image edit failed, fallback to legacy: {e}")
+
+    if not all_images:
+        calls_needed = (n + 1) // 2
+        if calls_needed == 1:
+            all_images = await call_grok_legacy(
                 token,
                 f"Image Edit: {edit_request.prompt}",
                 model_info,
                 file_attachments=file_ids,
                 response_format=response_format,
             )
-            for _ in range(calls_needed)
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        all_images = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Concurrent call failed: {result}")
-            elif isinstance(result, list):
-                all_images.extend(result)
+        else:
+            tasks = [
+                call_grok_legacy(
+                    token,
+                    f"Image Edit: {edit_request.prompt}",
+                    model_info,
+                    file_attachments=file_ids,
+                    response_format=response_format,
+                )
+                for _ in range(calls_needed)
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            all_images = []
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Concurrent call failed: {result}")
+                elif isinstance(result, list):
+                    all_images.extend(result)
 
     selected_images = _pick_images(all_images, n)
     success = any(isinstance(img, str) and img and img != "error" for img in selected_images)
