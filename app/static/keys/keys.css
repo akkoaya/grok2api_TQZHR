@@ -31,3 +31,29 @@
   color: black;
 }
 
+.stat-card-compact {
+  padding: 10px 12px;
+}
+
+.keys-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.keys-toolbar-left {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.keys-toolbar-left #keys-search {
+  width: 220px;
+}
+
+.keys-toolbar-left #keys-status-filter {
+  width: 140px;
+}

@@ -59,6 +59,9 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 
 > Optional: copy `.env.example` to `.env` to configure port/logging/storage. You can also set `COMPOSE_PROFILES` to enable `redis/pgsql/mysql` with one compose file (see examples in `.env.example`).
 
+> Deployment consistency: Local (FastAPI), Docker, and Cloudflare Workers share the same admin behavior semantics (token filters, API key management, and admin API responses).
+> Cloudflare keeps one-click deployment via `.github/workflows/cloudflare-workers.yml`, and Docker keeps one-command startup via `docker compose up -d`.
+
 ### Admin panel
 
 URL: `http://<host>:8000/login`  
@@ -66,9 +69,34 @@ Default username/password: `admin` / `admin` (config keys `app.admin_username` /
 
 Pages:
 - `http://<host>:8000/admin/token`: Token management (import/export/batch ops/auto register)
+- `http://<host>:8000/admin/keys`: API key management (stats/filter/create/edit/delete)
 - `http://<host>:8000/admin/datacenter`: Data center (metrics + log viewer)
 - `http://<host>:8000/admin/config`: Configuration (including auto register settings)
 - `http://<host>:8000/admin/cache`: Cache management (local cache + online assets)
+
+### Token Management Enhancements (Filters + State Rules)
+
+- Type filters: `sso`, `supersso` (combinable).
+- Status filters: `active`, `invalid`, `exhausted` (combinable, union semantics).
+- Includes result count and reset filters.
+- Selection/batch operations after filtering are token-key based (not row-index based), preventing accidental operations on hidden rows.
+- State classification rules:
+  - `invalid`: `status in invalid/expired/disabled`
+  - `exhausted`: `status = cooling`, or (`quota_known = true` and `quota <= 0`), or (super token with `heavy_quota_known = true` and `heavy_quota <= 0`)
+  - `active`: neither invalid nor exhausted
+- Type mapping: `ssoBasic -> sso`, `ssoSuper -> supersso` (API `token_type` values are `sso` / `ssoSuper`).
+
+### API Key Management Enhancements
+
+- New stat cards: total, active, inactive, exhausted today.
+- Toolbar supports search (name/key), status filter (all/active/inactive/exhausted), and reset.
+- Create/edit modal improvements:
+  - Auto-generate key
+  - Quick quota presets (recommended/unlimited)
+  - Disable submit button while submitting (prevent duplicate submit)
+  - Copy key convenience after successful creation
+- Better error surface: frontend now prioritizes backend `detail/error/message`.
+- Updating a non-existent key returns `404` on both FastAPI and Workers.
 
 ### Auto Register (Token -> Add -> Auto Register)
 
@@ -188,6 +216,18 @@ Note: any other parameters will be discarded and ignored.
 
 <br>
 
+### Admin API Compatibility Changes (FastAPI + Workers)
+
+1. `GET /api/v1/admin/tokens` adds fields (additive, legacy-compatible):
+   - `token_type`
+   - `quota_known`
+   - `heavy_quota`
+   - `heavy_quota_known`
+2. `POST /api/v1/admin/keys/update`:
+   - Returns `404` when key does not exist.
+3. Quota semantics:
+   - `quota_known = false` means quota is unknown (e.g., `remaining_queries = -1`) and should not be treated as exhausted directly.
+
 ## Configuration
 
 Config file: `data/config.toml`
@@ -253,6 +293,13 @@ When upgrading from older versions, the service will keep existing local data an
 | | `max_runtime_minutes` | Max runtime | Stop the job after N minutes (0 = unlimited). | `0` |
 
 <br>
+
+## Fixes In This Release
+
+- Fixed token page `refreshStatus` relying on global `event`; now passes button reference explicitly.
+- Added unified token normalization (`normalizeSsoToken`) to fix `sso=` dedupe/import/batch-selection inconsistencies.
+- Fixed API key update to return `404` for non-existent keys instead of false success.
+- Improved token/key page error messages by surfacing backend details (`detail/error/message`).
 
 ## Star History
 

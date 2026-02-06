@@ -61,6 +61,9 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 
 > 可选：复制 `.env.example` 为 `.env`，可配置端口/日志/存储等；并可通过 `COMPOSE_PROFILES` 一键启用 `redis/pgsql/mysql`（见 `.env.example` 内示例）。
 
+> 部署一致性说明：本地（FastAPI）/ Docker / Cloudflare Workers 共用同一套管理功能语义（Token 筛选、API Key 管理、后台管理接口语义一致）。
+> Cloudflare 可通过 `.github/workflows/cloudflare-workers.yml` 一键部署，Docker 仍保持 `docker compose up -d` 一键启动。
+
 ### 管理面板
 
 访问地址：`http://<host>:8000/login`
@@ -69,9 +72,34 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 
 常用页面：
 - `http://<host>:8000/admin/token`：Token 管理（导入/导出/批量操作/自动注册）
+- `http://<host>:8000/admin/keys`：API Key 管理（统计/筛选/新增/编辑/删除）
 - `http://<host>:8000/admin/datacenter`：数据中心（常用指标 + 日志查看）
 - `http://<host>:8000/admin/config`：配置管理（含自动注册所需配置）
 - `http://<host>:8000/admin/cache`：缓存管理（本地缓存 + 在线资产）
+
+### Token 管理增强（筛选 + 状态判定）
+
+- 支持类型筛选：`sso`、`supersso`（可组合）。
+- 支持状态筛选：`活跃`、`失效`、`额度用尽`（可组合，按并集语义）。
+- 提供“结果计数”和“清空筛选”。
+- 筛选后勾选/全选/批量刷新/批量删除均基于 Token 唯一值，避免过滤后行索引错位导致误操作。
+- 状态判定规则：
+  - `失效`：`status` 为 `invalid/expired/disabled`
+  - `额度用尽`：`status = cooling`，或（`quota_known = true` 且 `quota <= 0`），或（super 且 `heavy_quota_known = true` 且 `heavy_quota <= 0`）
+  - `活跃`：非失效且非额度用尽
+- 类型映射规则：`ssoBasic -> sso`，`ssoSuper -> supersso`（接口字段 `token_type` 为 `sso` / `ssoSuper`）。
+
+### API Key 管理增强
+
+- 页面新增统计卡片：总数、启用、禁用、今日额度用尽。
+- 工具栏支持：名称/Key 搜索、状态筛选（全部/启用/禁用/额度用尽）、重置筛选。
+- 新增 API Key 弹窗增强：
+  - 自动生成 Key
+  - 额度预设（推荐/不限）
+  - 提交中禁用按钮，防止重复提交
+  - 创建成功后支持一键复制 Key
+- 错误提示优化：前端优先展示后端 `detail/error/message`，避免“创建失败/更新失败”无上下文。
+- 更新不存在的 Key 会返回 `404`（FastAPI 与 Workers 一致）。
 
 ### 自动注册（Token 管理 -> 添加 -> 自动注册）
 
@@ -213,6 +241,18 @@ curl http://localhost:8000/v1/images/generations \
 
 <br>
 
+### 后台管理 API 兼容变更（FastAPI + Workers）
+
+1. `GET /api/v1/admin/tokens`（增量兼容，保留旧字段）新增：
+   - `token_type`
+   - `quota_known`
+   - `heavy_quota`
+   - `heavy_quota_known`
+2. `POST /api/v1/admin/keys/update`：
+   - 当 key 不存在时返回 `404`（此前部分实现可能返回成功）。
+3. 额度语义补充：
+   - `quota_known = false` 表示额度未知（例如 `remaining_queries = -1` 场景），不应直接判定为“额度用尽”。
+
 ## 参数配置
 
 配置文件：`data/config.toml`
@@ -263,6 +303,13 @@ curl http://localhost:8000/v1/images/generations \
 |                       | `admin_assets_batch_size`  | 管理端批量   | 管理端在线资产统计/清理批量并发数量。推荐 10。       | `10`                                                    |
 
 <br>
+
+## 本次修复
+
+- 修复 Token 页 `refreshStatus` 依赖全局 `event` 的问题，改为显式传入按钮引用，避免不同运行环境下按钮状态异常。
+- 新增 Token 统一归一化（`normalizeSsoToken`），修复 `sso=` 前缀导致的去重、导入、批量选择不一致问题。
+- 修复 API Key 更新接口“key 不存在仍返回成功”问题，统一为 `404`。
+- 优化 Token/API Key 页面错误提示，优先展示后端具体错误（`detail/error/message`）。
 
 ## Star History
 

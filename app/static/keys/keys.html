@@ -10,7 +10,7 @@
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
   <link href="/static/common/common.css" rel="stylesheet">
-  <link href="/static/keys/keys.css?v=1" rel="stylesheet">
+  <link href="/static/keys/keys.css?v=2" rel="stylesheet">
   <link href="/static/common/toast.css" rel="stylesheet">
 </head>
 
@@ -35,6 +35,41 @@
     </div>
 
     <div class="h-px bg-[var(--border)] my-6"></div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" id="keys-stats">
+      <div class="stat-card stat-card-compact">
+        <div class="stat-value text-lg" id="keys-stat-total">0</div>
+        <div class="stat-label">总数</div>
+      </div>
+      <div class="stat-card stat-card-compact">
+        <div class="stat-value text-lg text-green-600" id="keys-stat-active">0</div>
+        <div class="stat-label">启用</div>
+      </div>
+      <div class="stat-card stat-card-compact">
+        <div class="stat-value text-lg text-gray-500" id="keys-stat-inactive">0</div>
+        <div class="stat-label">禁用</div>
+      </div>
+      <div class="stat-card stat-card-compact">
+        <div class="stat-value text-lg text-orange-600" id="keys-stat-exhausted">0</div>
+        <div class="stat-label">今日额度用尽</div>
+      </div>
+    </div>
+
+    <div class="keys-toolbar mb-4">
+      <div class="keys-toolbar-left">
+        <input type="text" id="keys-search" class="geist-input" placeholder="搜索名称或 Key..." oninput="onKeyFilterChange()">
+        <select id="keys-status-filter" class="geist-input" onchange="onKeyFilterChange()">
+          <option value="all">全部状态</option>
+          <option value="active">仅启用</option>
+          <option value="inactive">仅禁用</option>
+          <option value="exhausted">仅额度用尽</option>
+        </select>
+        <button class="geist-button-outline text-xs px-3" onclick="resetKeyFilters()">重置</button>
+      </div>
+      <div class="keys-toolbar-right text-xs text-[var(--accents-5)]">
+        结果 <span id="keys-filter-count">0</span>
+      </div>
+    </div>
 
     <div class="rounded-lg overflow-hidden bg-white mb-4 overflow-x-auto">
       <table class="geist-table min-w-[1000px]">
@@ -81,9 +116,18 @@
           </div>
           <div>
             <label class="modal-label mb-1 block">API Key 值</label>
-            <input type="text" id="key-value" class="geist-input font-mono" placeholder="留空=随机生成 sk-..." />
+            <div class="flex gap-2">
+              <input type="text" id="key-value" class="geist-input font-mono" placeholder="留空=随机生成 sk-..." />
+              <button type="button" class="geist-button-outline text-xs px-3" onclick="generateKeyValue()">自动生成</button>
+            </div>
             <div class="text-xs text-[var(--accents-5)] mt-1" id="key-value-hint">允许任意字符串；建议使用 sk- 前缀。</div>
           </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-[var(--accents-5)]">额度预设</span>
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="applyKeyLimitPreset('recommended')">推荐</button>
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="applyKeyLimitPreset('unlimited')">不限</button>
         </div>
 
         <div class="grid grid-cols-4 gap-3">
@@ -123,8 +167,7 @@
   <script src="/static/common/admin-auth.js"></script>
   <script src="/static/common/header.js"></script>
   <script src="/static/common/footer.js"></script>
-  <script src="/static/keys/keys.js?v=1"></script>
+  <script src="/static/keys/keys.js?v=2"></script>
 </body>
 
 </html>
-

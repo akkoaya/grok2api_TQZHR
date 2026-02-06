@@ -89,6 +89,40 @@
         </div>
       </div>
 
+      <div id="token-filter-bar"
+        class="mb-4 bg-white border border-[var(--border)] rounded-lg px-4 py-3 flex flex-wrap items-center gap-4">
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-[var(--accents-5)]">类型</span>
+          <label class="filter-chip">
+            <input type="checkbox" id="filter-type-sso" onchange="onFilterChange()">
+            <span>sso</span>
+          </label>
+          <label class="filter-chip">
+            <input type="checkbox" id="filter-type-supersso" onchange="onFilterChange()">
+            <span>supersso</span>
+          </label>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-[var(--accents-5)]">状态</span>
+          <label class="filter-chip">
+            <input type="checkbox" id="filter-status-active" onchange="onFilterChange()">
+            <span>活跃</span>
+          </label>
+          <label class="filter-chip">
+            <input type="checkbox" id="filter-status-invalid" onchange="onFilterChange()">
+            <span>失效</span>
+          </label>
+          <label class="filter-chip">
+            <input type="checkbox" id="filter-status-exhausted" onchange="onFilterChange()">
+            <span>额度用尽</span>
+          </label>
+        </div>
+        <div class="ml-auto flex items-center gap-3">
+          <span class="text-xs text-[var(--accents-5)]">结果 <span id="filter-result-count">0</span></span>
+          <button onclick="resetFilters()" class="geist-button-outline text-xs px-3 h-7">清空筛选</button>
+        </div>
+      </div>
+
       <!-- Token Table -->
       <div class="rounded-lg overflow-hidden bg-white mb-4 overflow-x-auto">
         <table class="geist-table min-w-[800px]">
