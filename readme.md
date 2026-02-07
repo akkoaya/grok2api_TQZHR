@@ -261,6 +261,25 @@ curl http://localhost:8000/v1/images/generations \
 
 <br>
 
+### `GET /v1/images/method`
+
+> 返回当前生图后端方式（`/chat` 与 `/admin/chat` 用于判断是否启用“新生图瀑布流 + 宽高比 + 并发”）
+
+```bash
+curl http://localhost:8000/v1/images/method \
+  -H "Authorization: Bearer $GROK2API_API_KEY"
+```
+
+返回示例：
+```json
+{ "image_generation_method": "legacy" }
+```
+
+- 可选值：`legacy`、`imagine_ws_experimental`
+- Cloudflare / Docker / 本地 三种部署均保持同一接口语义
+
+<br>
+
 ### `POST /v1/images/edits`
 
 > 图像编辑接口（`multipart/form-data`）
