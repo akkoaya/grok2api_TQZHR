@@ -15,6 +15,7 @@ let imageContinuousLatencyCount = 0;
 let imageContinuousActive = 0;
 let imageContinuousLastError = '';
 let imageContinuousRunToken = 0;
+let imageContinuousDesiredConcurrency = 1;
 
 function q(id) {
   return document.getElementById(id);
@@ -294,6 +295,14 @@ function getImageContinuousActiveCount() {
   return imageContinuousSockets.filter((it) => it && it.active && !it.closed).length;
 }
 
+function getImageContinuousOpenCount() {
+  return imageContinuousSockets.filter((it) => {
+    const ws = it?.ws;
+    if (!ws || it?.closed) return false;
+    return ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING;
+  }).length;
+}
+
 function setImageStatusText(text) {
   const el = q('image-status-text');
   if (el) el.textContent = String(text || '-');
@@ -345,9 +354,9 @@ function updateImageRunModeUI() {
   }
 
   if (isContinuous && imageContinuousRunning) {
-    setImageStatusText(imageContinuousActive > 0 ? '运行中' : '连接中');
+    setImageStatusText(imageContinuousActive > 0 ? 'Running' : 'Connecting');
   } else if (isContinuous) {
-    setImageStatusText('未连接');
+    setImageStatusText('Idle');
   }
 
   updateImageContinuousButtons();
@@ -452,15 +461,18 @@ function parseWsMessage(raw) {
   }
 }
 
-function openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio) {
+function openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio, attempt = 0) {
   const wsUrl = buildImagineWsUrl();
   const ws = new WebSocket(wsUrl);
   const socketState = {
     index: socketIndex,
     ws,
     runToken,
+    attempt,
     active: false,
     closed: false,
+    hadError: false,
+    lastError: '',
     runId: '',
   };
   imageContinuousSockets.push(socketState);
@@ -486,8 +498,8 @@ function openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio) {
       socketState.active = status === 'running';
       updateImageContinuousStats();
       if (imageContinuousRunning) {
-        if (status === 'running') setImageStatusText('运行中');
-        if (status === 'stopped') setImageStatusText('已停止');
+        if (status === 'running') setImageStatusText('Running');
+        if (status === 'stopped') setImageStatusText('Stopped');
       }
       updateImageContinuousButtons();
       return;
@@ -496,7 +508,7 @@ function openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio) {
     if (msgType === 'image') {
       socketState.active = true;
       appendWaterfallImage(data, socketIndex);
-      if (imageContinuousRunning) setImageStatusText('运行中');
+      if (imageContinuousRunning) setImageStatusText('Running');
       updateImageContinuousButtons();
       return;
     }
@@ -504,21 +516,22 @@ function openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio) {
     if (msgType === 'error') {
       const message = String(data?.message || 'unknown error').trim() || 'unknown error';
       setImageContinuousError(message);
-      if (imageContinuousRunning) setImageStatusText('杩愯涓紙鏈夐敊璇級');
+      if (imageContinuousRunning) setImageStatusText('Running (with errors)');
       return;
     }
 
     if (msgType === 'pong') {
-      if (imageContinuousRunning && imageContinuousActive <= 0) setImageStatusText('连接已建立');
+      if (imageContinuousRunning && imageContinuousActive <= 0) setImageStatusText('Connected');
     }
   };
 
   ws.onerror = () => {
     if (runToken !== imageContinuousRunToken) return;
-    setImageContinuousError(`WS${socketIndex + 1} connection error`);
+    socketState.hadError = true;
+    socketState.lastError = `WS${socketIndex + 1} connection error`;
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     socketState.closed = true;
     socketState.active = false;
     updateImageContinuousStats();
@@ -526,7 +539,33 @@ function openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio) {
     if (runToken !== imageContinuousRunToken) return;
     if (imageContinuousRunning) {
       const stillActive = getImageContinuousActiveCount();
-      if (stillActive <= 0) setImageStatusText('杩炴帴鏂紑');
+      const stillOpen = getImageContinuousOpenCount();
+
+      if (event?.code === 1008 && stillActive <= 0 && stillOpen <= 0) {
+        setImageContinuousError('WebSocket auth rejected. Check API key.');
+        setImageStatusText('Auth failed');
+      } else if (socketState.hadError && stillActive <= 0 && stillOpen <= 0) {
+        setImageContinuousError(socketState.lastError || `WS${socketIndex + 1} connection error`);
+        setImageStatusText('Disconnected');
+      }
+
+      if (
+        event?.code !== 1000 &&
+        event?.code !== 1008 &&
+        socketState.attempt < 1 &&
+        getImageRunMode() === 'continuous' &&
+        imageGenerationExperimental
+      ) {
+        setTimeout(() => {
+          if (!imageContinuousRunning || runToken !== imageContinuousRunToken) return;
+          if (getImageContinuousOpenCount() >= imageContinuousDesiredConcurrency) return;
+          openImageContinuousSocket(socketIndex, runToken, prompt, aspectRatio, socketState.attempt + 1);
+        }, 1200);
+      }
+
+      if (stillActive <= 0 && stillOpen <= 0 && event?.code === 1000) {
+        setImageStatusText('Stopped');
+      }
       updateImageContinuousButtons();
     }
   };
@@ -556,9 +595,9 @@ function stopImageContinuous() {
   imageContinuousSockets = [];
 
   if (imageGenerationExperimental && getImageRunMode() === 'continuous') {
-    setImageStatusText('已停止');
+    setImageStatusText('Stopped');
   } else {
-    setImageStatusText('未连接');
+    setImageStatusText('Idle');
   }
   updateImageContinuousButtons();
   updateImageContinuousStats();
@@ -570,17 +609,18 @@ function startImageContinuous() {
   }
   const prompt = String(q('image-prompt')?.value || '').trim();
   if (!prompt) {
-    showToast('璇疯緭鍏?prompt', 'warning');
+    showToast('Please input prompt', 'warning');
     return;
   }
   if (!getUserApiKey()) {
-    showToast('璇峰厛濉啓 API Key', 'warning');
+    showToast('Please input API key first', 'warning');
     return;
   }
 
   const aspectRatio = String(q('image-aspect')?.value || '2:3').trim() || '2:3';
   const concurrency = getImageContinuousConcurrency();
   const token = imageContinuousRunToken + 1;
+  imageContinuousDesiredConcurrency = concurrency;
 
   stopImageContinuous();
   imageContinuousRunToken = token;
@@ -589,7 +629,7 @@ function startImageContinuous() {
   imageContinuousActive = 0;
   if (!q('image-waterfall')?.children?.length) resetImageContinuousMetrics(true);
 
-  setImageStatusText('连接中');
+  setImageStatusText('Connecting');
   updateImageContinuousButtons();
   updateImageContinuousStats();
 
