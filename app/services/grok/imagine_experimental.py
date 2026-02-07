@@ -33,6 +33,7 @@ ASSET_API = "https://assets.grok.com"
 TIMEOUT = 120
 
 ProgressCallback = Callable[[int, float], Optional[Awaitable[None] | None]]
+CompletedCallback = Callable[[int, str], Optional[Awaitable[None] | None]]
 
 
 def resolve_image_generation_method(raw: Any) -> str:
@@ -140,13 +141,19 @@ class ImagineExperimentalService:
         token: str,
         prompt: str,
         n: int = 2,
+        aspect_ratio: str = "2:3",
         progress_cb: Optional[ProgressCallback] = None,
+        completed_cb: Optional[CompletedCallback] = None,
         timeout: Optional[int] = None,
     ) -> List[str]:
         request_id = str(uuid.uuid4())
         target_count = max(1, int(n or 1))
         effective_timeout = max(10, int(timeout or self.timeout))
-        payload = self._build_ws_payload(prompt=prompt, request_id=request_id)
+        payload = self._build_ws_payload(
+            prompt=prompt,
+            request_id=request_id,
+            aspect_ratio=aspect_ratio,
+        )
 
         session = AsyncSession(impersonate=BROWSER)
         ws = None
@@ -209,7 +216,15 @@ class ImagineExperimentalService:
 
                 image_url = self._extract_url(msg)
                 if image_url and self._is_completed(msg, progress):
+                    is_new = image_id not in final_urls
                     final_urls.setdefault(image_id, image_url)
+                    if is_new and completed_cb is not None:
+                        try:
+                            maybe_coro = completed_cb(image_indices[image_id], image_url)
+                            if asyncio.iscoroutine(maybe_coro):
+                                await maybe_coro
+                        except Exception as e:
+                            logger.debug(f"Imagine completion callback failed: {e}")
                     if len(final_urls) >= target_count:
                         break
 
@@ -260,6 +275,10 @@ class ImagineExperimentalService:
             return out
         finally:
             await dl.close()
+
+    async def convert_url(self, token: str, url: str, response_format: str = "b64_json") -> str:
+        items = await self.convert_urls(token=token, urls=[url], response_format=response_format)
+        return items[0] if items else ""
 
     @staticmethod
     def _to_asset_urls(file_uris: List[str]) -> List[str]:
