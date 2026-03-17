@@ -231,7 +231,7 @@ class ChatRequestBuilder:
             "returnImageBytes": False,
             "returnRawGrokInXaiRequest": False,
             "enableImageStreaming": True,
-            "imageGenerationCount": 2,
+            "imageGenerationCount": 1,
             "forceConcise": False,
             "toolOverrides": {},
             "enableSideBySide": True,

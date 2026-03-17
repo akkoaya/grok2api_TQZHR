@@ -32,10 +32,9 @@ def _normalize_generated_asset_urls(input_data: Any) -> List[str]:
 
 
 def _build_image_tag(image_url: str) -> str:
-    safe_url = html.escape(image_url or "", quote=True)
-    if not safe_url:
+    if not image_url:
         return ""
-    return f'<img src="{safe_url}">'
+    return f"![img]({image_url})"
 
 
 def _build_video_poster_preview(video_url: str, thumbnail_url: str = "") -> str:

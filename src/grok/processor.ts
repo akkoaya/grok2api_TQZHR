@@ -82,8 +82,8 @@ function escapeHtmlAttr(value: string): string {
 }
 
 function buildImageTag(src: string): string {
-  const safeSrc = escapeHtmlAttr(src);
-  return safeSrc ? `<img src="${safeSrc}" />` : "";
+  if (!src) return "";
+  return `![img](${src})`;
 }
 
 function buildImageHtml(globalCfg: GlobalSettings, origin: string, urls: string[]): string {

@@ -295,7 +295,7 @@ function buildExperimentalImageEditPayload(args: {
     returnImageBytes: false,
     returnRawGrokInXaiRequest: false,
     enableImageStreaming: true,
-    imageGenerationCount: 2,
+    imageGenerationCount: 1,
     forceConcise: false,
     toolOverrides: { imageGen: true },
     enableSideBySide: true,
