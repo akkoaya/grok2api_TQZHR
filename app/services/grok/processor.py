@@ -16,7 +16,30 @@ from app.services.grok.assets import DownloadService
 ASSET_URL = "https://assets.grok.com/"
 
 
+def _normalize_generated_asset_urls(input_data: Any) -> List[str]:
+    if not isinstance(input_data, list):
+        return []
+
+    urls: List[str] = []
+    for value in input_data:
+        if not isinstance(value, str):
+            continue
+        url = value.strip()
+        if not url or url == "/":
+            continue
+        urls.append(url)
+    return urls
+
+
+def _build_image_tag(image_url: str) -> str:
+    safe_url = html.escape(image_url or "", quote=True)
+    if not safe_url:
+        return ""
+    return f'<img src="{safe_url}">'
+
+
 def _build_video_poster_preview(video_url: str, thumbnail_url: str = "") -> str:
+
     """将 <video> 替换为可点击的 Poster 预览图（用于前端展示）"""
     safe_video = html.escape(video_url or "", quote=True)
     safe_thumb = html.escape(thumbnail_url or "", quote=True)
@@ -81,8 +104,23 @@ class BaseProcessor:
         if self.app_url:
             return f"{self.app_url.rstrip('/')}{local_path}"
         return local_path
+
+    async def build_image_html(self, url: str) -> str:
+        if not url:
+            return ""
+
+        if getattr(self, "image_format", "url") == "base64":
+            dl_service = self._get_dl()
+            final_url = await dl_service.to_base64(url, self.token, "image")
+            if not final_url:
+                final_url = await self.process_url(url, "image")
+        else:
+            final_url = await self.process_url(url, "image")
+
+        return _build_image_tag(final_url)
             
     def _sse(self, content: str = "", role: str = None, finish: str = None) -> str:
+
         """构建 SSE 响应 (StreamProcessor 通用)"""
         if not hasattr(self, 'response_id'):
             self.response_id = None
@@ -126,8 +164,11 @@ class StreamProcessor(BaseProcessor):
     
     async def process(self, response: AsyncIterable[bytes]) -> AsyncGenerator[str, None]:
         """处理流式响应"""
+        is_image = False
+
         try:
             async for line in response:
+
                 if not line:
                     continue
                 try:
@@ -159,39 +200,39 @@ class StreamProcessor(BaseProcessor):
                         yield self._sse(f"正在生成第{idx}张图片中，当前进度{progress}%\n")
                     continue
                 
+                if resp.get("imageAttachmentInfo"):
+                    is_image = True
+
                 # modelResponse
                 if mr := resp.get("modelResponse"):
+                    raw_urls = mr.get("generatedImageUrls")
+                    urls = _normalize_generated_asset_urls(raw_urls)
+                    if urls:
+                        is_image = True
+
                     if self.think_opened and self.show_think:
-                        if msg := mr.get("message"):
+                        if not urls and (msg := mr.get("message")):
                             yield self._sse(msg + "\n")
                         yield self._sse("</think>\n")
                         self.think_opened = False
-                    
-                    # 处理生成的图片
-                    for url in mr.get("generatedImageUrls", []):
-                        parts = url.split("/")
-                        img_id = parts[-2] if len(parts) >= 2 else "image"
-                        
-                        if self.image_format == "base64":
-                            dl_service = self._get_dl()
-                            base64_data = await dl_service.to_base64(url, self.token, "image")
-                            if base64_data:
-                                yield self._sse(f"![{img_id}]({base64_data})\n")
-                            else:
-                                final_url = await self.process_url(url, "image")
-                                yield self._sse(f"![{img_id}]({final_url})\n")
-                        else:
-                            final_url = await self.process_url(url, "image")
-                            yield self._sse(f"![{img_id}]({final_url})\n")
-                    
+
+                    for url in urls:
+                        image_html = await self.build_image_html(url)
+                        if image_html:
+                            yield self._sse(image_html + "\n")
+
                     if (meta := mr.get("metadata", {})).get("llm_info", {}).get("modelHash"):
                         self.fingerprint = meta["llm_info"]["modelHash"]
-                    continue
-                
+                    if urls or isinstance(raw_urls, list) or is_image:
+                        continue
+
                 # 普通 token
+                if is_image:
+                    continue
                 if (token := resp.get("token")) is not None:
                     if token and not (self.filter_tags and any(t in token for t in self.filter_tags)):
                         yield self._sse(token)
+
                         
             if self.think_opened:
                 yield self._sse("</think>\n")
@@ -233,28 +274,22 @@ class CollectProcessor(BaseProcessor):
                 
                 if mr := resp.get("modelResponse"):
                     response_id = mr.get("responseId", "")
-                    content = mr.get("message", "")
-                    
-                    if urls := mr.get("generatedImageUrls"):
-                        content += "\n"
+                    raw_urls = mr.get("generatedImageUrls")
+                    urls = _normalize_generated_asset_urls(raw_urls)
+
+                    if urls:
+                        image_chunks: List[str] = []
                         for url in urls:
-                            parts = url.split("/")
-                            img_id = parts[-2] if len(parts) >= 2 else "image"
-                            
-                            if self.image_format == "base64":
-                                dl_service = self._get_dl()
-                                base64_data = await dl_service.to_base64(url, self.token, "image")
-                                if base64_data:
-                                    content += f"![{img_id}]({base64_data})\n"
-                                else:
-                                    final_url = await self.process_url(url, "image")
-                                    content += f"![{img_id}]({final_url})\n"
-                            else:
-                                final_url = await self.process_url(url, "image")
-                                content += f"![{img_id}]({final_url})\n"
-                    
+                            image_html = await self.build_image_html(url)
+                            if image_html:
+                                image_chunks.append(image_html)
+                        content = "\n".join(image_chunks)
+                    elif not isinstance(raw_urls, list):
+                        content = mr.get("message", "")
+
                     if (meta := mr.get("metadata", {})).get("llm_info", {}).get("modelHash"):
                         fingerprint = meta["llm_info"]["modelHash"]
+
                             
         except Exception as e:
             logger.error(f"Collect processing error: {e}", extra={"model": self.model})

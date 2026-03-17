@@ -73,7 +73,32 @@ function buildVideoHtml(args: { videoUrl: string; posterUrl?: string; posterPrev
   return buildVideoTag(args.videoUrl);
 }
 
+function escapeHtmlAttr(value: string): string {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function buildImageTag(src: string): string {
+  const safeSrc = escapeHtmlAttr(src);
+  return safeSrc ? `<img src="${safeSrc}" />` : "";
+}
+
+function buildImageHtml(globalCfg: GlobalSettings, origin: string, urls: string[]): string {
+  return urls
+    .map((u) => {
+      const imgPath = encodeAssetPath(u);
+      const imgUrl = toImgProxyUrl(globalCfg, origin, imgPath);
+      return buildImageTag(imgUrl);
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
 function base64UrlEncode(input: string): string {
+
   const bytes = new TextEncoder().encode(input);
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
@@ -304,33 +329,31 @@ export function createOpenAiStreamFromGrokNdjson(
               continue;
             }
 
-            if (grok.imageAttachmentInfo) isImage = true;
+            const modelResp = grok.modelResponse;
+            if (grok.imageAttachmentInfo || normalizeGeneratedAssetUrls(modelResp?.generatedImageUrls).length) {
+              isImage = true;
+            }
             const rawToken = grok.token;
 
             if (isImage) {
-              const modelResp = grok.modelResponse;
               if (modelResp) {
                 const urls = normalizeGeneratedAssetUrls(modelResp.generatedImageUrls);
                 if (urls.length) {
-                  const linesOut: string[] = [];
-                  for (const u of urls) {
-                    const imgPath = encodeAssetPath(u);
-                    const imgUrl = toImgProxyUrl(global, origin, imgPath);
-                    linesOut.push(`![Generated Image](${imgUrl})`);
+                  const imageHtml = buildImageHtml(global, origin, urls);
+                  if (imageHtml) {
+                    controller.enqueue(
+                      encoder.encode(makeChunk(id, created, currentModel, imageHtml, "stop")),
+                    );
+                    controller.enqueue(encoder.encode(makeDone()));
+                    if (opts.onFinish) await opts.onFinish({ status: finalStatus, duration: (Date.now() - startTime) / 1000 });
+                    controller.close();
+                    return;
                   }
-                  controller.enqueue(
-                    encoder.encode(makeChunk(id, created, currentModel, linesOut.join("\n"), "stop")),
-                  );
-                  controller.enqueue(encoder.encode(makeDone()));
-                  if (opts.onFinish) await opts.onFinish({ status: finalStatus, duration: (Date.now() - startTime) / 1000 });
-                  controller.close();
-                  return;
                 }
-              } else if (typeof rawToken === "string" && rawToken) {
-                controller.enqueue(encoder.encode(makeChunk(id, created, currentModel, rawToken)));
               }
               continue;
             }
+
 
             // Text chat stream
             if (Array.isArray(rawToken)) continue;
@@ -456,18 +479,16 @@ export async function parseOpenAiFromGrokNdjson(
     if (typeof modelResp.error === "string" && modelResp.error) throw new Error(modelResp.error);
 
     if (typeof modelResp.model === "string" && modelResp.model) model = modelResp.model;
-    if (typeof modelResp.message === "string") content = modelResp.message;
 
     const rawUrls = modelResp.generatedImageUrls;
     const urls = normalizeGeneratedAssetUrls(rawUrls);
     if (urls.length) {
-      for (const u of urls) {
-        const imgPath = encodeAssetPath(u);
-        const imgUrl = toImgProxyUrl(global, origin, imgPath);
-        content += `\n![Generated Image](${imgUrl})`;
-      }
+      content = buildImageHtml(global, origin, urls);
       break;
     }
+
+    if (typeof modelResp.message === "string") content = modelResp.message;
+
 
     // If upstream emits placeholder/empty generatedImageUrls in intermediate frames, keep scanning.
     if (Array.isArray(rawUrls)) continue;
