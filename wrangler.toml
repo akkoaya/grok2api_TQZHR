@@ -1,4 +1,4 @@
-name = "grok2api"
+name = "grok2api-v1"
 main = "src/index.ts"
 compatibility_date = "2026-01-28"
 
