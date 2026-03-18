@@ -87,14 +87,11 @@ function buildImageTag(src: string): string {
 }
 
 function buildImageHtml(globalCfg: GlobalSettings, origin: string, urls: string[]): string {
-  return urls
-    .map((u) => {
-      const imgPath = encodeAssetPath(u);
-      const imgUrl = toImgProxyUrl(globalCfg, origin, imgPath);
-      return buildImageTag(imgUrl);
-    })
-    .filter(Boolean)
-    .join("\n");
+  const first = urls[0];
+  if (!first) return "";
+  const imgPath = encodeAssetPath(first);
+  const imgUrl = toImgProxyUrl(globalCfg, origin, imgPath);
+  return buildImageTag(imgUrl);
 }
 
 function base64UrlEncode(input: string): string {

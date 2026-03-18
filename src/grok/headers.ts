@@ -1,12 +1,13 @@
 import type { GrokSettings } from "../settings";
 
+const DEFAULT_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
+
 const BASE_HEADERS: Record<string, string> = {
   Accept: "*/*",
   "Accept-Language": "zh-CN,zh;q=0.9",
   Origin: "https://grok.com",
   Referer: "https://grok.com/",
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
   "Sec-Ch-Ua": '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
   "Sec-Ch-Ua-Mobile": "?0",
   "Sec-Ch-Ua-Platform": '"macOS"',
@@ -45,6 +46,7 @@ export function getDynamicHeaders(settings: GrokSettings, pathname: string): Rec
   if (!dynamic && !statsigId) throw new Error("配置缺少 x_statsig_id（且未启用 dynamic_statsig）");
 
   const headers: Record<string, string> = { ...BASE_HEADERS };
+  headers["User-Agent"] = (settings.user_agent ?? "").trim() || DEFAULT_USER_AGENT;
   headers["x-statsig-id"] = statsigId;
   headers["x-xai-request-id"] = crypto.randomUUID();
   headers["Content-Type"] = pathname.includes("upload-file") ? "text/plain;charset=UTF-8" : "application/json";

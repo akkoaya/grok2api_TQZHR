@@ -215,8 +215,8 @@ class StreamProcessor(BaseProcessor):
                         yield self._sse("</think>\n")
                         self.think_opened = False
 
-                    for url in urls:
-                        image_html = await self.build_image_html(url)
+                    if urls:
+                        image_html = await self.build_image_html(urls[0])
                         if image_html:
                             yield self._sse(image_html + "\n")
 
@@ -277,12 +277,8 @@ class CollectProcessor(BaseProcessor):
                     urls = _normalize_generated_asset_urls(raw_urls)
 
                     if urls:
-                        image_chunks: List[str] = []
-                        for url in urls:
-                            image_html = await self.build_image_html(url)
-                            if image_html:
-                                image_chunks.append(image_html)
-                        content = "\n".join(image_chunks)
+                        image_html = await self.build_image_html(urls[0])
+                        content = image_html or ""
                     elif not isinstance(raw_urls, list):
                         content = mr.get("message", "")
 
