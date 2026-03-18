@@ -44,7 +44,8 @@ const LOCALE_MAP = {
     "cf_clearance": { title: "CF Clearance", desc: "Cloudflare 验证 Cookie，用于验证 Cloudflare 的验证。" },
     "max_retry": { title: "最大重试", desc: "请求 Grok 服务失败时的最大重试次数。" },
     "retry_status_codes": { title: "重试状态码", desc: "触发重试的 HTTP 状态码列表。" },
-    "image_generation_method": { title: "生图调用方式", desc: "旧方法稳定；新方法为实验性方法。" }
+    "image_generation_method": { title: "生图调用方式", desc: "旧方法稳定；新方法为实验性方法。" },
+    "user_agent": { title: "User-Agent", desc: "访问 Grok API 时使用的浏览器 User-Agent，留空使用默认值。建议与实际浏览器版本一致以避免 Cloudflare 拦截。" }
   },
   "token": {
     "label": "Token 池设置",

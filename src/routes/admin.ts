@@ -273,6 +273,7 @@ adminRoutes.get("/api/v1/admin/config", requireAdminAuth, async (c) => {
         image_generation_method: normalizeImageGenerationMethod(
           settings.grok.image_generation_method,
         ),
+        user_agent: String(settings.grok.user_agent ?? ""),
       },
       token: {
         auto_refresh: Boolean(settings.token.auto_refresh),
@@ -344,6 +345,7 @@ adminRoutes.post("/api/v1/admin/config", requireAdminAuth, async (c) => {
           grokCfg.image_generation_method,
         );
       }
+      if (typeof grokCfg.user_agent === "string") grok_config.user_agent = grokCfg.user_agent.trim();
     }
 
     if (tokenCfg && typeof tokenCfg === "object") {
