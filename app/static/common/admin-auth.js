@@ -155,6 +155,12 @@ function clearStoredAppKey() {
   cachedApiKey = null;
 }
 
+function normalizeBearerToken(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return raw.toLowerCase().startsWith('bearer ') ? raw.slice(7).trim() : raw;
+}
+
 async function requestApiKey(creds) {
   const body = serializeCreds(creds);
   const res = await fetch('/api/v1/admin/login', {
@@ -187,7 +193,12 @@ async function ensureApiKey() {
 }
 
 function buildAuthHeaders(apiKey) {
-  return apiKey ? { 'Authorization': apiKey } : {};
+  const token = normalizeBearerToken(apiKey);
+  return token ? {
+    'Authorization': `Bearer ${token}`,
+    'X-Admin-Key': token,
+    'X-API-Key': token
+  } : {};
 }
 
 function logout() {

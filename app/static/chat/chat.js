@@ -33,7 +33,7 @@ function getUserApiKey() {
 
 function buildApiHeaders() {
   const k = getUserApiKey();
-  return k ? { Authorization: `Bearer ${k}` } : {};
+  return k ? { Authorization: `Bearer ${k}`, 'X-API-Key': k } : {};
 }
 
 function escapeHtml(s) {

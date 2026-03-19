@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Optional, Set
 
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_config
@@ -87,7 +87,37 @@ async def _load_legacy_api_keys() -> Set[str]:
         return keys
 
 
+def _extract_token_value(raw_value: str | None) -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+    if value.lower().startswith("bearer "):
+        return value[7:].strip()
+    return value
+
+
+def _resolve_request_token(request: Optional[Request], header_names: tuple[str, ...]) -> str:
+    if request is None:
+        return ""
+    for header_name in header_names:
+        token = _extract_token_value(request.headers.get(header_name))
+        if token:
+            return token
+    return ""
+
+
+def _resolve_auth_token(
+    auth: Optional[HTTPAuthorizationCredentials],
+    request: Request,
+    header_names: tuple[str, ...],
+) -> str:
+    if isinstance(auth, HTTPAuthorizationCredentials) and str(auth.credentials or "").strip():
+        return str(auth.credentials).strip()
+    return _resolve_request_token(request, header_names)
+
+
 async def verify_api_key(
+    request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Security(security),
 ) -> Optional[str]:
     """
@@ -103,14 +133,14 @@ async def verify_api_key(
     if not api_key and not legacy_keys:
         return None
 
-    if not auth:
+    token = _resolve_auth_token(auth, request, ("x-api-key",))
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = auth.credentials
     if (api_key and token == api_key) or token in legacy_keys:
         return token
 
@@ -141,6 +171,7 @@ async def is_valid_admin_token(token: str) -> bool:
 
 
 async def verify_admin_api_key(
+    request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Security(security),
 ) -> str:
     """
@@ -151,14 +182,14 @@ async def verify_admin_api_key(
     - `app.api_key`
     - 历史/新增的 API keys（兼容旧版调用）
     """
-    if not auth:
+    token = _resolve_auth_token(auth, request, ("x-admin-key", "x-api-key"))
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = auth.credentials
     if await is_valid_admin_token(token):
         return token
 
@@ -170,6 +201,7 @@ async def verify_admin_api_key(
 
 
 async def verify_app_key(
+    request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Security(security),
 ) -> Optional[str]:
     """
@@ -186,21 +218,22 @@ async def verify_app_key(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not auth:
+    token = _resolve_auth_token(auth, request, ("x-admin-key", "x-api-key"))
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if auth.credentials != app_key:
+    if token != app_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return auth.credentials
+    return token
 
 
 __all__ = ["verify_api_key", "verify_app_key", "verify_admin_api_key", "is_valid_admin_token"]
