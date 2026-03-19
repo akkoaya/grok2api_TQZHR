@@ -267,20 +267,26 @@ class CollectProcessor(BaseProcessor):
                     continue
                 
                 resp = data.get("result", {}).get("response", {})
+
+                if rid := resp.get("responseId"):
+                    response_id = rid
                 
                 if (llm := resp.get("llmInfo")) and not fingerprint:
                     fingerprint = llm.get("modelHash", "")
                 
                 if mr := resp.get("modelResponse"):
-                    response_id = mr.get("responseId", "")
+                    if mr_rid := mr.get("responseId"):
+                        response_id = mr_rid
                     raw_urls = mr.get("generatedImageUrls")
                     urls = _normalize_generated_asset_urls(raw_urls)
 
                     if urls:
                         image_html = await self.build_image_html(urls[0])
                         content = image_html or ""
-                    elif not isinstance(raw_urls, list):
-                        content = mr.get("message", "")
+                    else:
+                        message = mr.get("message")
+                        if isinstance(message, str) and message:
+                            content = message
 
                     if (meta := mr.get("metadata", {})).get("llm_info", {}).get("modelHash"):
                         fingerprint = meta["llm_info"]["modelHash"]

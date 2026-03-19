@@ -121,6 +121,54 @@ async def verify_api_key(
     )
 
 
+async def is_valid_admin_token(token: str) -> bool:
+    """Validate admin-only bearer tokens for the management APIs."""
+    token = str(token or "").strip()
+    if not token:
+        return False
+
+    admin_key = str(get_config("app.app_key", "admin") or "admin").strip() or "admin"
+    api_key = str(get_config("app.api_key", "") or "").strip()
+    legacy_keys = await _load_legacy_api_keys()
+
+    if token == admin_key:
+        return True
+    if api_key and token == api_key:
+        return True
+    if token in legacy_keys:
+        return True
+    return False
+
+
+async def verify_admin_api_key(
+    auth: Optional[HTTPAuthorizationCredentials] = Security(security),
+) -> str:
+    """
+    验证管理后台 Bearer Token。
+
+    允许以下任一凭证访问后台 API：
+    - `app.app_key`（后台登录密码，默认 `admin`）
+    - `app.api_key`
+    - 历史/新增的 API keys（兼容旧版调用）
+    """
+    if not auth:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = auth.credentials
+    if await is_valid_admin_token(token):
+        return token
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def verify_app_key(
     auth: Optional[HTTPAuthorizationCredentials] = Security(security),
 ) -> Optional[str]:
@@ -155,5 +203,5 @@ async def verify_app_key(
     return auth.credentials
 
 
-__all__ = ["verify_api_key", "verify_app_key"]
+__all__ = ["verify_api_key", "verify_app_key", "verify_admin_api_key", "is_valid_admin_token"]
 
